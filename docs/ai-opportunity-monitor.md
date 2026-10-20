@@ -14,6 +14,7 @@ python -m radar.ai_monitor templates --root /path/to/ai-video-monitor --tier cor
 python -m radar.ai_monitor pippit --root /path/to/ai-video-monitor
 python -m radar.ai_monitor review --root /path/to/ai-video-monitor export
 python -m radar.ai_monitor evidence --root /path/to/ai-video-monitor --observation-id ID
+python -m radar.ai_monitor.review_plan batch --root /path/to/ai-video-monitor --execution-id ID
 ```
 
 On the existing server, the only state directory remains
@@ -71,6 +72,24 @@ separate lanes. Handoffs record 024 as the base, 025 as a fixed-action/BGM refer
 reference rights and generation validation. A handoff never makes a site launch-ready.
 The original P1/P2/P3, live full-page verification, historical-age veto, stable outbox
 deduplication and real delivery receipt requirements remain in force.
+
+The native daily pre-run persists a review plan bound to its verified execution. It
+includes every pending discovery first seen within 48 hours (discovery does not
+prove demand age), followed by source-fair backlog work. Review batches contain up
+to 16 entries; this is a fetch batch size, not a daily review or P1 output cap.
+Submissions still use the existing evidence and semantic review contract. Progress
+counts only accepted/watch/excluded decisions submitted after the plan began;
+blocked items and unfinished batches remain visible and rotate in later plans.
+
+Hermes' AI-only completion route writes the same readable daily summary to the
+existing cloud table and the privately configured email recipient, including runs
+with no new eligible outbox. It reports collection coverage, reviewed and remaining
+work, qualifying reports, observations and gaps. Incomplete planned review or
+coverage cannot become a successful no-opportunity result. Cloud and email have
+separate durable receipts; uncertain email sends reconcile the exact sent copy
+before any resend. A sent-folder receipt confirms provider acceptance/sent copy,
+not recipient inbox placement. Existing opportunity outboxes and their ACKs remain
+immutable and continue through the original publication contract.
 
 ## Pippit: a narrow article and AI-video scope
 
