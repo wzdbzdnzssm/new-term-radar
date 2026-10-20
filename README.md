@@ -327,3 +327,9 @@ The diagram is drawn by `docs/make_diagram.py` (needs `rsvg-convert` and `ffmpeg
 MIT. Extracted from the radar that runs daily behind [agentskillshub.top](https://agentskillshub.top).
 
 <!-- mcp-name: io.github.zhuyansen/new-term-radar -->
+
+## Server AI opportunity monitoring
+
+The optional `python -m radar.ai_monitor` entry unifies existing AI opportunity
+collection and review, including named video templates, while retaining durable
+runtime state and verified outbox contracts. See [operations](docs/ai-opportunity-monitor.md).

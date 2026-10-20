@@ -36,7 +36,7 @@ new-term-radar-mcp = "new_term_radar.mcp_server:main"
 # The code lives in radar/ so `python -m radar` works from a clone. Installed, the
 # package is `new_term_radar`: PyPI already has an unrelated project that owns `radar`.
 [tool.setuptools]
-packages = ["new_term_radar"]
+packages = ["new_term_radar", "new_term_radar.ai_monitor"]
 
 [tool.setuptools.package-dir]
 new_term_radar = "radar"
