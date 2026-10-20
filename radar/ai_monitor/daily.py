@@ -1,11 +1,11 @@
-"""Daily 58-source collection plus supplemental template evidence, without delivery."""
+"""Daily configured-source collection plus supplemental templates, without delivery."""
 import argparse
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .runtime import DEFAULT_ROOT
-from . import scheduled_scan, templates
+from . import scheduled_scan, templates, pippit
 
 
 def main(argv=None):
@@ -16,7 +16,8 @@ def main(argv=None):
         scanned = scheduled_scan.run(args.root)
         tier = 'weekly' if datetime.now(ZoneInfo('Asia/Shanghai')).weekday() == 6 else 'daily'
         templated = templates.run(args.root, tier)
-        return 1 if scanned or templated else 0
+        pip = pippit.run(args.root) if pippit.configured(args.root) else 0
+        return 1 if scanned or templated or pip else 0
     except scheduled_scan.ScanBusy as error:
         import json
         print(json.dumps({'status': 'busy', 'error': str(error)}))

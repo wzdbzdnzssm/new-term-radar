@@ -11,6 +11,13 @@ ROOT = DEFAULT_ROOT
 def review_lane(source, evidence, migrated):
     if migrated: return 'migration'
     title = ' '.join(e.get('title', '') for e in evidence if e.get('valid')).lower()
+    if source['id'] == 'pippit-ai':
+        if re.search(r'\b(image|photo|picture|poster|logo)\b', title) and not re.search(r'\b(video|dance|animation|motion)\b', title):
+            return 'static_image'
+        context = ' '.join(e.get('title', '') + ' ' + e.get('summary', '') for e in evidence if e.get('valid'))
+        if re.search(r'\b(video|dance|motion|animation|freestyle|lip.?sync|transition)\b', context, re.I):
+            return 'video_candidate'
+        return 'supplemental_evidence'
     if re.search(r'\b(api|sdk|cli|developer|integration|agent)\b', title) and source['id'] == 'higgsfield-ai': return 'developer_update'
     if re.search(r'\bugc\b', title): return 'secondary'
     if re.search(r'\b(image|photo|picture)\b', title) and not re.search(r'\b(video|dance|animation|motion)\b', title): return 'static_image'

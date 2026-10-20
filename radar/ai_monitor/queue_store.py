@@ -3,6 +3,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -50,6 +51,10 @@ def canonical_path(url, source=None):
         parts.pop(0)
     if media and len(parts) > 1 and parts[0] == 'ai' and parts[1].lower() in LANGS:
         parts.pop(1)
+    if (source or {}).get('id') == 'pippit-ai' and len(parts) == 2 and parts[0] == 'template-detail':
+        identifier = re.search(r'(?:^|-)(\d{19})$', parts[1])
+        if identifier:
+            return '/template-detail/' + identifier.group(1)
     return '/' + '/'.join(parts)
 
 def observation_id(source_id, path):

@@ -372,6 +372,7 @@ def main(argv=None):
             result = load(args.root / 'pending-observations.json', {'observations': []})
             result['template_candidates'] = load(args.root / 'video-template-candidates.json', {'entities': {}})['entities']
             result['template_coverage'] = load(args.root / 'latest-template-scan.json', {})
+            result['pippit_template_coverage'] = load(args.root / 'latest-pippit-template-scan.json', {})
         print(json.dumps(result, ensure_ascii=False))
     return 0
 if __name__ == '__main__': raise SystemExit(main())
