@@ -81,12 +81,23 @@ Submissions still use the existing evidence and semantic review contract. Progre
 counts only accepted/watch/excluded decisions submitted after the plan began;
 blocked items and unfinished batches remain visible and rotate in later plans.
 
-Hermes' AI-only completion route writes the readable daily summary to the existing
-cloud table and the privately configured email recipient, including runs with no
-new eligible outbox. Long reports use an overview and qualifying results in the
-email body plus a UTF-8 attachment identical to the complete cloud report. It reports collection coverage, reviewed and remaining
-work, qualifying reports, observations and gaps. Incomplete planned review or
-coverage cannot become a successful no-opportunity result. Cloud and email have
+Hermes' AI-only completion route writes only newly featured P1/P2 keyword briefs
+to the existing cloud table and privately configured email recipient, deduplicated
+by stable need ID without a P1 count limit. Each entry has a source-named main
+term, suggested related and long-tail terms, specific SEO advice, an actual launch
+or cross-platform signal, and platform brands. Suggestions are not observed search
+queries. Same-intent variants share one page; distinct intent can justify a new page.
+Evidence URLs, P3 observations, collection/review counts and failures remain internal.
+After semantic review, use `python -m radar.ai_monitor.keyword_brief candidates
+--root ROOT --execution-id ID`, then `submit --root ROOT --input FILE` with
+evidence-bound briefs and `preview --root ROOT --execution-id ID`. Briefs live in
+`keyword-briefs/` and never modify the original outbox or ACK. Every selected P1/P2
+needs a valid brief before finalization; a missing brief is a recoverable internal
+failure, not a no-keyword report. Only a complete run with no selected terms emits
+`本次暂无可发布的新趋势词`.
+Short reports are inline; long reports use a keyword overview in the email body
+plus a UTF-8 attachment identical to the complete cloud keyword report.
+Incomplete planned review or coverage cannot become a successful no-keyword result. Cloud and email have
 separate durable receipts; uncertain email sends reconcile the frozen sent body
 and download the sent attachment to verify its full-content hash before any resend. A sent-folder receipt confirms provider acceptance/sent copy,
 not recipient inbox placement. Existing opportunity outboxes and their ACKs remain
