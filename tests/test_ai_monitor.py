@@ -142,6 +142,24 @@ def test_commit_failure_retains_exception_type_in_worker_receipt(tmp_path, monke
     assert 'MemoryError' in result['error']
 
 
+def test_worker_does_not_reload_pending_after_durable_commit(tmp_path, monkeypatch):
+    store.write(tmp_path/'monitor/config.json', {'sources': [{'id': 'pollo-ai'}]})
+    monkeypatch.setattr(daily_scan, 'collect', lambda *a, **k: ({}, {'id': 'pollo-ai', 'status': 'ok'}, []))
+    original = daily_scan.load
+    reads = 0
+    def bounded_load(path, default):
+        nonlocal reads
+        if path.name == 'pending-observations.json':
+            reads += 1
+            if reads > 1:
+                raise MemoryError('duplicate post-commit read')
+        return original(path, default)
+    monkeypatch.setattr(daily_scan, 'load', bounded_load)
+    assert daily_scan.run(tmp_path, ['pollo-ai'], receipt_path='receipt.json') == 0
+    assert reads == 1
+    assert store.load(tmp_path/'receipt.json',{})['status'] == 'committed'
+
+
 def test_failed_aggregate_preserves_snapshot_and_is_not_no_change(tmp_path, monkeypatch):
     monkeypatch.setattr(templates, 'MAPS', {'core': [], 'daily': [], 'weekly': []})
     monkeypatch.setattr(templates, 'AGGREGATES', ['/effects'])

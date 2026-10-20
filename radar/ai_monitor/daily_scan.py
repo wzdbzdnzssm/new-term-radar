@@ -63,6 +63,7 @@ def run(root, selected=None, fetcher=monitor.fetch_bytes, evidence_fetcher=None,
         if not sources: raise ValueError('No sources selected')
         if receipt_path and len(sources) != 1: raise ValueError('A worker receipt requires exactly one source')
         results, errors = [], []
+        pending_count = None
         for source in sources:
             state_path = 'monitor/state/' + source['id'] + '.json'; previous = load(root / state_path, None)
             try:
@@ -72,6 +73,7 @@ def run(root, selected=None, fetcher=monitor.fetch_bytes, evidence_fetcher=None,
                 errors.append({'source_id': source['id'], 'error': str(error)}); results.append(result); continue
             pending = load(root / 'pending-observations.json', {'observations': [], 'created_at': monitor.utc_now()})
             pending['observations'] = merge_observations(pending['observations'], incoming)
+            pending_count = len(pending['observations'])
             try:
                 operations = [op(state_path, state), op('pending-observations.json', pending)]
                 if receipt_path:
@@ -81,10 +83,14 @@ def run(root, selected=None, fetcher=monitor.fetch_bytes, evidence_fetcher=None,
                 errors.append({'source_id': source['id'], 'error': 'Commit failed; replay required: ' + type(error).__name__ + ': ' + str(error)})
                 result['error_type'] = type(error).__name__; result['status'] = 'error'; result['error'] = errors[-1]['error']; results.append(result); break
             results.append(result)
-        pending = load(root / 'pending-observations.json', {'observations': []})
+        # A successful worker still holds its large state/result/transaction graph.
+        # Reloading pending here duplicates decoded Unicode and parsed objects,
+        # and can exceed RLIMIT_AS *after* durable commit. Reuse the count we wrote.
+        if pending_count is None:
+            pending_count = len(load(root / 'pending-observations.json', {'observations': []})['observations'])
         stamp = monitor.utc_now().replace(':', '').replace('+', '_')
         status = 'ok' if not errors and len(results) == len(sources) else ('partial' if any(r['status'] == 'ok' for r in results) else 'failed')
-        manifest = {'schema_version': 2, 'observed_at': monitor.utc_now(), 'status': status, 'source_count': len(sources), 'success_count': sum(r['status'] == 'ok' for r in results), 'errors': errors, 'pending_observations_count': len(pending['observations']), 'raw_result_file': 'monitor/results/' + stamp + '.json'}
+        manifest = {'schema_version': 2, 'observed_at': monitor.utc_now(), 'status': status, 'source_count': len(sources), 'success_count': sum(r['status'] == 'ok' for r in results), 'errors': errors, 'pending_observations_count': pending_count, 'raw_result_file': 'monitor/results/' + stamp + '.json'}
         if receipt_path:
             # Success is durable in the same journal as baseline and pending. A
             # commit failure may still be replayable: never overwrite its receipt.
