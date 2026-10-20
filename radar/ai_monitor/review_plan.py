@@ -75,6 +75,33 @@ def progress(root, plan):
             'pending_sources': dict(Counter(r['source_id'] for r in pending))}
 
 
+def bind_collection(root, execution_id, exit_code):
+    """Append post-scan discoveries without changing this execution's reviewed work."""
+    path = 'review-runs/' + execution_id + '.json'
+    plan = load(root / path, {})
+    if not plan:
+        raise ValueError('Review plan does not exist')
+    scan = load(root / 'latest-scan.json', {})
+    pending = load(root / 'pending-observations.json', {'observations': []})['observations']
+    selected = {r['observation_id'] for r in plan['items']}
+    represented = {r['source_id'] for r in plan['items']}
+    cutoff = instant(plan['started_at']) - timedelta(hours=48)
+    added = []
+    for row in sorted(pending, key=lambda r: (instant(r.get('first_seen')), r['observation_id'])):
+        if row['observation_id'] in selected:
+            continue
+        if instant(row.get('first_seen')) >= cutoff or row['source_id'] not in represented:
+            added.append({k:row.get(k) for k in ('observation_id','source_id','canonical_path','first_seen','review_status')})
+            selected.add(row['observation_id'])
+            represented.add(row['source_id'])
+    plan['items'].extend(added)
+    plan['recent_discovery_count'] = sum(instant(r.get('first_seen')) >= cutoff for r in plan['items'])
+    plan.update(collection_run_id=scan.get('run_id'), collection_exit=exit_code,
+        collection_source_count=scan.get('source_count'), collection_recovery='finished')
+    commit(root, 'review-plan-collection', [op(path, plan)])
+    return plan
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['create', 'progress', 'batch', 'defer'])
@@ -105,6 +132,7 @@ def main():
                 and row['observation_id'] not in plan.get('deferred', {})]
             result = {'planned': state['planned'], 'remaining': state['remaining'],
                 'ready_to_review': len(unfinished),
+                'collection_notice': plan.get('collection_recovery'),
                 'items': unfinished[args.offset:args.offset+args.limit]}
         else:
             result = plan if args.command == 'create' else progress(args.root, plan)

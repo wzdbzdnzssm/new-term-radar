@@ -54,3 +54,20 @@ def test_mixed_timezone_oldest_uses_real_instant(tmp_path):
           {'observation_id':'later','source_id':'a','first_seen':'2020-01-01T01:00:00Z'}]
     save(tmp_path/'pending-observations.json',{'observations':rows})
     assert plan.create(tmp_path,'one')['items'][0]['observation_id']=='old'
+
+
+def test_recovered_collection_appends_without_resetting_existing_work(tmp_path):
+    recent=datetime.now(timezone.utc).isoformat()
+    save(tmp_path/'pending-observations.json',{'observations':[
+        {'observation_id':'a','source_id':'a','first_seen':recent}]})
+    original=plan.create(tmp_path,'run')
+    original['deferred']={'a':'HTTP 403'}
+    save(tmp_path/'review-runs/run.json',original)
+    save(tmp_path/'pending-observations.json',{'observations':[
+        {'observation_id':'b','source_id':'b','first_seen':recent}]})
+    save(tmp_path/'latest-scan.json',{'run_id':'new-config-batch','source_count':59})
+    result=plan.bind_collection(tmp_path,'run',0)
+    assert [r['observation_id'] for r in result['items']]==['a','b']
+    assert result['started_at']==original['started_at']
+    assert result['deferred']=={'a':'HTTP 403'}
+    assert result['collection_run_id']=='new-config-batch' and result['collection_exit']==0
