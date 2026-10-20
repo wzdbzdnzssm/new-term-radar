@@ -3,7 +3,29 @@ import re
 
 VERSION = 1
 SUMMARY_LIMIT = 500
-DATE_TOKEN = re.compile(r'\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b', re.I)
+MONTHS = 'January February March April May June July August September October November December'.split()
+MONTH_PATTERN = '(?:' + '|'.join(MONTHS) + ')'
+DATE_TOKEN = re.compile(r'\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}\s+' + MONTH_PATTERN + r'\s+\d{4}|' + MONTH_PATTERN + r'\s+\d{1,2},\s+\d{4})\b', re.I)
+
+
+def history_instant(token):
+    """Parse exact historical dates, keeping day-only dates at midnight UTC."""
+    from datetime import datetime, timezone
+    from .eligibility import instant
+    try:
+        return instant(token)
+    except ValueError:
+        pass
+    match = re.fullmatch(r'(\d{1,2})\s+(' + MONTH_PATTERN + r')\s+(\d{4})', token, re.I)
+    if match:
+        day, month, year = match.groups()
+    else:
+        match = re.fullmatch(r'(' + MONTH_PATTERN + r')\s+(\d{1,2}),\s+(\d{4})', token, re.I)
+        if not match:
+            raise ValueError('Unsupported historical date token')
+        month, day, year = match.groups()
+    month_number = [value.lower() for value in MONTHS].index(month.lower()) + 1
+    return datetime(int(year), month_number, int(day), tzinfo=timezone.utc)
 
 
 def _digest(value):
@@ -60,7 +82,6 @@ def _dates(rows):
 
 def prepare_history(record, requests):
     """Verify human-selected short quotes against the currently fetched body in memory."""
-    from datetime import datetime
     from .eligibility import instant
     if not verified(record):
         raise ValueError('Historical review requires a successful verified page')
@@ -81,10 +102,7 @@ def prepare_history(record, requests):
         token = item.get('date_text', '')
         if item.get('scope') != 'same_ai_video_need' or not token or token not in quote:
             raise ValueError('Historical date must identify the same AI video need')
-        try:
-            parsed = instant(token)
-        except ValueError:
-            parsed = instant(datetime.strptime(token, '%d %B %Y').isoformat())
+        parsed = history_instant(token)
         if parsed != instant(item['published_at']):
             raise ValueError('Historical date does not match quote')
         item.update(url=record['url'], evidence_file=record['evidence_file'],

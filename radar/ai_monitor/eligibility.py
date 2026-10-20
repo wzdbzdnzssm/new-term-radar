@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from urllib.parse import urldefrag, urljoin
 from .queue_store import digest, domain, load
-from .evidence_metadata import metadata_valid, verified, history_matches
+from .evidence_metadata import metadata_valid, verified, history_matches, DATE_TOKEN, history_instant
 
 POLICY = 'fresh48h-hot-priority-v2'
 
@@ -88,9 +88,9 @@ def ai_history_dates(record):
         quote = text[start:cursor]
         last_boundary = cursor
         if not re.search(r'earliest|first|went up|launched|released|published|appeared|available|from|since', quote, re.I): continue
-        for date in re.finditer(r'\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b', quote, re.I):
+        for date in DATE_TOKEN.finditer(quote):
             try:
-                value = instant(date[0]) if '-' in date[0] else datetime.strptime(date[0], '%d %B %Y').replace(tzinfo=timezone.utc)
+                value = history_instant(date[0])
             except ValueError: continue
             rows.append({'published_at': value.isoformat(), 'locator': 'text:' + str(start), 'original': quote, 'veto_only': True})
     return rows

@@ -3,7 +3,7 @@ import argparse
 import json
 import re
 from .eligibility import qualify, POLICY
-from .evidence_metadata import verified, history_matches
+from .evidence_metadata import verified, history_matches, history_instant
 from pathlib import Path
 from .queue_store import monitor, load, write, locked, recover, commit, op, digest, domain, merge_observations, earliest_time
 from .runtime import DEFAULT_ROOT
@@ -67,11 +67,7 @@ def validate_history(root, evidence, submitted):
         value = instant(item['published_at'])
         if item.get('scope') != 'same_ai_video_need' or item.get('date_text', '') not in quote or not item.get('date_text'): raise ValueError('Historical date must identify same AI video need')
         token = item['date_text']
-        from datetime import datetime
-        try: parsed = instant(token)
-        except ValueError:
-            try: parsed = instant(datetime.strptime(token, '%d %B %Y').isoformat())
-            except ValueError: raise ValueError('Unsupported historical date token')
+        parsed = history_instant(token)
         if parsed != value: raise ValueError('Historical date does not match quote')
         rows.append({**item, 'url': row['url'], 'locator': 'text:' + str(offset), 'veto_only': True})
     return rows
