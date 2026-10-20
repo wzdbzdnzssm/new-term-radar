@@ -222,7 +222,7 @@ def test_cli_is_standalone(fixture, capsys):
 
 @pytest.fixture
 def daily(fixture, monkeypatch):
-    path = Path('/home/admin/.hermes/scripts/new_term_radar_daily.py')
+    path = Path(__file__).resolve().parents[1] / 'scripts/new_term_radar_daily.py'
     spec = importlib.util.spec_from_file_location('daily_wrapper', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

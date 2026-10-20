@@ -160,6 +160,45 @@ def test_worker_does_not_reload_pending_after_durable_commit(tmp_path, monkeypat
     assert store.load(tmp_path/'receipt.json',{})['status'] == 'committed'
 
 
+@pytest.mark.parametrize('redirects', [False, True, None, 'canonical'])
+def test_removed_page_evidence_only_attaches_to_its_matching_entity(monkeypatch, redirects):
+    source={'id':'higgsfield-ai','sitemap_urls':['https://higgsfield.ai/sitemap.xml']}
+    old='https://higgsfield.ai/effects/old'
+    unrelated='https://higgsfield.ai/effects/unrelated'
+    new='https://higgsfield.ai/effects/new'
+    previous,_=store.monitor.reconcile(source,None,{old:{'lastmod':None},unrelated:{'lastmod':None}},'2026-01-01T00:00:00+00:00')
+    monkeypatch.setattr(store.monitor,'crawl',lambda *a: ({new:{'lastmod':None}},[]))
+    def evidence(url):
+        if url==old and redirects is None:
+            return {'url':url,'valid':False,'error':'source page unavailable'}
+        return {'url':url,'valid':True,'title':'Video template','final_url':new if url==old and redirects is True else url,
+                'html_canonical':new if url==old and redirects=='canonical' else None}
+    _,result,rows=daily_scan.collect(source,{},previous,evidence_fetcher=evidence)
+    assert len(rows)==1
+    assert {row['url'] for row in rows[0]['evidence']} == ({new,old} if redirects else {new})
+    assert unrelated not in rows[0]['evidence_urls']
+    assert rows[0]['first_seen']==('2026-01-01T00:00:00+00:00' if redirects else rows[0]['observed_at'])
+    assert len(result['migration_evidence_errors'])==(1 if redirects is None else 0)
+    assert rows[0]['evidence_errors']==[]
+
+
+def test_removed_aliases_match_only_their_entity_among_multiple_new_groups(monkeypatch):
+    source={'id':'higgsfield-ai','sitemap_urls':['https://higgsfield.ai/sitemap.xml']}
+    old=['https://higgsfield.ai/effects/old-one','https://higgsfield.ai/effects/old-two']
+    new=['https://higgsfield.ai/effects/new-one','https://higgsfield.ai/effects/new-two']
+    previous,_=store.monitor.reconcile(source,None,{url:{'lastmod':None} for url in old},'2026-01-01T00:00:00+00:00')
+    monkeypatch.setattr(store.monitor,'crawl',lambda *a: ({url:{'lastmod':None} for url in new},[]))
+    def evidence(url):
+        return {'url':url,'valid':True,'title':'Video template','final_url':url,'html_canonical':new[0] if url in old else None}
+    _,_,rows=daily_scan.collect(source,{},previous,evidence_fetcher=evidence)
+    grouped={row['canonical_path']:row for row in rows}
+    migrated=grouped['/effects/new-one']
+    assert set(migrated['migrated_from'])==set(old)
+    assert set(migrated['aliases'])==set(old+[new[0]])
+    assert migrated['first_seen']=='2026-01-01T00:00:00+00:00'
+    assert {row['url'] for row in grouped['/effects/new-two']['evidence']}=={new[1]}
+
+
 def test_failed_aggregate_preserves_snapshot_and_is_not_no_change(tmp_path, monkeypatch):
     monkeypatch.setattr(templates, 'MAPS', {'core': [], 'daily': [], 'weekly': []})
     monkeypatch.setattr(templates, 'AGGREGATES', ['/effects'])

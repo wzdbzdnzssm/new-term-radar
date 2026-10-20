@@ -30,14 +30,19 @@ def collect(source, options, previous, fetcher=monitor.fetch_bytes, evidence_fet
     removed = [row['url'] for row in result['removed']]
     observations = []
     old_evidence = {url: evidence_reference(evidence_fetcher(url)) for url in removed} if groups and evidence_fetcher else {}
+    # A removed page is evidence for a new entity only when its redirect or
+    # canonical actually identifies that entity. Attaching the entire removed
+    # library to every group is quadratic and contaminates unrelated reviews.
+    result['migration_evidence_errors'] = [{'url': url, 'error': record.get('error', 'Invalid old page')}
+                                          for url, record in old_evidence.items() if not record.get('valid')]
     for path, rows in groups.items():
         urls = sorted(row['url'] for row in rows); evidence = []; failures = []; migrated = []
         for old in removed:
             record = old_evidence.get(old, {'url': old, 'valid': False, 'error': 'Old page evidence unavailable'})
-            evidence.append(record)
             targets = [record.get('final_url'), record.get('html_canonical')]
-            if record.get('valid') and any(t and domain(t) == domain(urls[0]) and canonical_path(t, source) == path for t in targets): migrated.append(old)
-            elif not record.get('valid'): failures.append({'url': old, 'error': record.get('error', 'Invalid old page')})
+            if record.get('valid') and any(t and domain(t) == domain(urls[0]) and canonical_path(t, source) == path for t in targets):
+                evidence.append(record)
+                migrated.append(old)
         first = earliest_time(*(row['first_seen'] for row in rows))
         for url in urls:
             record = evidence_reference(evidence_fetcher(url)) if evidence_fetcher else {'url': url, 'valid': False, 'error': 'Evidence not fetched'}
