@@ -81,13 +81,14 @@ Submissions still use the existing evidence and semantic review contract. Progre
 counts only accepted/watch/excluded decisions submitted after the plan began;
 blocked items and unfinished batches remain visible and rotate in later plans.
 
-Hermes' AI-only completion route writes the same readable daily summary to the
-existing cloud table and the privately configured email recipient, including runs
-with no new eligible outbox. It reports collection coverage, reviewed and remaining
+Hermes' AI-only completion route writes the readable daily summary to the existing
+cloud table and the privately configured email recipient, including runs with no
+new eligible outbox. Long reports use an overview and qualifying results in the
+email body plus a UTF-8 attachment identical to the complete cloud report. It reports collection coverage, reviewed and remaining
 work, qualifying reports, observations and gaps. Incomplete planned review or
 coverage cannot become a successful no-opportunity result. Cloud and email have
-separate durable receipts; uncertain email sends reconcile the exact sent copy
-before any resend. A sent-folder receipt confirms provider acceptance/sent copy,
+separate durable receipts; uncertain email sends reconcile the frozen sent body
+and download the sent attachment to verify its full-content hash before any resend. A sent-folder receipt confirms provider acceptance/sent copy,
 not recipient inbox placement. Existing opportunity outboxes and their ACKs remain
 immutable and continue through the original publication contract.
 
