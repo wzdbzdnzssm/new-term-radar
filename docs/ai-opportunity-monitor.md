@@ -112,8 +112,8 @@ plus a UTF-8 attachment identical to the complete cloud keyword report.
 The next report starts at the prior report day's confirmed coverage cutoff; same-day
 reruns retain that day's terms only when their original real signal passes the same
 review. New supply can cite normal committed baseline additions (not initial scope,
-inventory or restored URLs), even without a detail publication date. Higgsfield
-persists small future `supply-deltas/` facts alongside its ordinary report transaction;
+inventory or restored URLs), even without a detail publication date. Higgsfield and
+the three selected Pippit SSR pages persist small future `supply-deltas/` facts in their ordinary report transactions;
 missing historical pre-states are never reconstructed. Frozen reports record their exact
 window. Incomplete coverage, planned review, or remaining pending blocks every final
 keyword report, including a no-keyword result. Cloud and email have

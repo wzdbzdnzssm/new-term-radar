@@ -137,7 +137,7 @@ def run_locked(root, page_reader):
     report = {'source_id': SOURCE_ID, 'observed_at': timestamp, 'status': 'ok', 'pages': [], 'events': [],
               'scope': 'Three selected AI video trend pages; not the 335-shard template library',
               'notice': 'First inventory and source upload dates are not new demand; platform usage/play counters are not independent demand.'}
-    incoming, accepted_ids = [], set()
+    incoming, accepted_ids, supply_deltas = [], set(), []
     for url in PAGES:
         row = {'url': url}
         report['pages'].append(row)
@@ -150,6 +150,7 @@ def run_locked(root, page_reader):
             row.update(status='unread', error=type(error).__name__ + ': ' + str(error))
             continue
         previous = state['pages'].get(url)
+        added_urls = []
         for card in cards:
             identifier = card['web_id']
             key = SOURCE_ID + ':' + identifier
@@ -185,6 +186,8 @@ def run_locked(root, page_reader):
                 report['events'].append({'entity_id': key, 'name': card['name'], 'change_type': change, 'event_key': event_key})
                 entity['event_keys'].append(event_key)
                 entity['change_type'] = change
+                if not seen and not old:
+                    added_urls.append(card['url'])
                 path = canonical_path(card['url'], {'id': SOURCE_ID})
                 incoming.append({'observation_id': observation_id(SOURCE_ID, path), 'source_id': SOURCE_ID,
                                  'source_name': 'Pippit', 'canonical_path': path, 'observed_at': timestamp,
@@ -198,12 +201,20 @@ def run_locked(root, page_reader):
         state['pages'][url] = {'observed_at': timestamp, 'ids': sorted(card['web_id'] for card in cards)}
         row.update(status='ok', card_count=len(cards), baseline_created=previous is None,
                    raw_html_hash=record.get('raw_html_hash'), named_candidate_count=sum(card['named_status'] == 'named_candidate' for card in cards))
+        if added_urls:
+            delta = {'source_id':SOURCE_ID,'index_url':url,'status':'ok','baseline_created':False,
+                     'before_observed_at':previous['observed_at'],'observed_at':timestamp,
+                     'added_urls':sorted(set(added_urls)),
+                     'notice':'New named template ID after established SSR baseline; not demand birth or search heat.'}
+            relative = 'supply-deltas/' + digest(delta) + '.json'
+            supply_deltas.append(op(relative,delta))
+            row['supply_delta'] = {'path':relative,'sha256':digest(delta)}
     report['status'] = 'ok' if all(row['status'] == 'ok' for row in report['pages']) else 'partial'
     report.update(unique_video_count=len(accepted_ids), queued_observation_count=len(incoming),
                   retained_entity_count=sum(key.startswith(SOURCE_ID + ':') for key in pool['entities']))
     # A fully failed read preserves both the snapshots and shared queues byte for
     # byte; its explicit degraded report must still be visible to daily review.
-    operations = [op('latest-pippit-template-scan.json', report)]
+    operations = [op('latest-pippit-template-scan.json', report)] + supply_deltas
     if accepted_ids:
         operations += [op('pippit-template-state.json', state), op('video-template-candidates.json', pool)]
     if incoming:

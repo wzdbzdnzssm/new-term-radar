@@ -59,6 +59,7 @@ def test_first_inventory_cross_page_dedup_and_repeat_preserve_history(radar, car
     assert pippit.run(radar, reader(cards)) == 0
     report = store.load(radar / 'latest-pippit-template-scan.json', {})
     assert report['events'] == [] and report['queued_observation_count'] == 0
+    assert not list((radar/'supply-deltas').glob('*.json'))
     pool = store.load(radar / 'video-template-candidates.json', {})['entities']
     assert len(pool) == len(cards) + 1
     assert pool['higgsfield-ai:existing'] == old['entities']['higgsfield-ai:existing']
@@ -77,6 +78,12 @@ def test_one_new_card_joins_original_queue_export_and_reappearance_is_silent(rad
     assert pippit.run(radar, reader(cards[:2])) == 0
     report = store.load(radar / 'latest-pippit-template-scan.json', {})
     assert len(report['events']) == 1 and report['queued_observation_count'] == 1
+    references=[row['supply_delta'] for row in report['pages'] if 'supply_delta' in row]
+    assert len(references)==1
+    delta=store.load(radar/references[0]['path'],{})
+    assert store.digest(delta)==references[0]['sha256'] and delta['source_id']=='pippit-ai'
+    assert delta['baseline_created'] is False and delta['before_observed_at']
+    assert len(delta['added_urls'])==1 and cards[1]['web_id'] in delta['added_urls'][0]
     pending = store.load(radar / 'pending-observations.json', {})['observations']
     assert len(pending) == 1
     identifier = cards[1]['web_id']
@@ -93,6 +100,8 @@ def test_one_new_card_joins_original_queue_export_and_reappearance_is_silent(rad
     assert pippit.run(radar, reader(cards[:2])) == 0
     assert store.load(radar / 'latest-pippit-template-scan.json', {})['events'] == []
     assert len(store.load(radar / 'pending-observations.json', {})['observations']) == 1
+    assert len(list((radar/'supply-deltas').glob('*.json')))==1
+    assert all('supply_delta' not in row for row in store.load(radar/'latest-pippit-template-scan.json',{})['pages'])
 
 
 def test_signature_metrics_and_slug_changes_do_not_create_another_entity(radar, cards):
@@ -111,6 +120,7 @@ def test_signature_metrics_and_slug_changes_do_not_create_another_entity(radar, 
         assert current[key]['first_seen_at'] == previous[key]['first_seen_at']
         assert len(current[key]['urls']) == 2
     assert store.load(radar / 'latest-pippit-template-scan.json', {})['events'] == []
+    assert not list((radar/'supply-deltas').glob('*.json'))
     url = changed[0]['short_title_en'] + '-' + changed[0]['web_id']
     assert store.canonical_path('https://www.pippit.ai/template-detail/' + url, {'id': 'pippit-ai'}) == '/template-detail/' + changed[0]['web_id']
 

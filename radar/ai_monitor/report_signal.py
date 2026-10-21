@@ -160,6 +160,14 @@ def supply_evidence(root, plan, items):
     return [row for row in result if (row['source_id'],canonical_path(row['url'],{'id':row['source_id']})) in subjects]
 
 
+def candidate(item):
+    result={k:item.get(k) for k in ('event_id','need_id','id','event','need','first_seen','eligibility')}
+    result['item_hash']=digest(item)
+    result['valid_evidence']=[{k:row.get(k) for k in ('source_id','url','evidence_file','content_hash','checked_at','title')}
+                              for row in item.get('valid_evidence',[])]
+    return result
+
+
 def submit(root, plan, values):
     from .keyword_brief import selected
     events = {item['event_id']: item for item in selected(root, plan)}
@@ -195,10 +203,12 @@ def main():
             keys={item.get('need_id') or item['id'] for item in items}
             pool=load(args.root/'opportunity-registry.json',{}).get('observation_pool',[])
             result = {'execution_id': args.execution_id, 'window_start': start, 'window_end': end,
-                      'items': [dict(item, item_hash=digest(item)) for item in items],
+                      'items': [candidate(item) for item in items],
                       'source_addition_evidence':supply_evidence(args.root,plan,items),
-                      'original_observations':[{k:row.get(k) for k in ('observation_id','need_id','source_id',
-                          'canonical_path','first_seen','observed_at','is_first_seen','migrated_from','evidence')}
+                      'original_observations':[{**{k:row.get(k) for k in ('observation_id','need_id','source_id',
+                          'canonical_path','first_seen','observed_at','is_first_seen','migrated_from')},
+                          'original_evidence':[{k:e.get(k) for k in ('evidence_file','content_hash','checked_at')}
+                              for e in row.get('evidence',[])]}
                           for row in pool if row.get('need_id') in keys],
                       'existing_reviews': reviews(args.root, plan)}
         elif args.command == 'submit':
