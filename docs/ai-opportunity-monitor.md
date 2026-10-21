@@ -82,6 +82,11 @@ counts only accepted/watch/excluded decisions submitted after the plan began;
 blocked items and unfinished batches remain incomplete. Late arrivals extend the
 same plan. Collection receipts use execution-specific batches and snapshots captured
 inside the collectors' locks, so a later silent scan cannot replace the bound facts.
+If a current subject page is unavailable, `review_pages --root ROOT
+--history-for-observation ID` lists only existing hash-verified metadata bound to
+that observation's URLs. Historical captures can support historical observation
+review, but never establish current availability or fresh publication. Current
+HTTP failures stay recorded; the query does not fetch, classify or submit decisions.
 
 Hermes' AI-only completion route writes only eligible P1/P2 keyword briefs in the report window
 to the existing cloud table and privately configured email recipient, deduplicated

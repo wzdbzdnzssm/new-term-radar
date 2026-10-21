@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urljoin
 from .queue_store import monitor, digest, load, write, locked, recover, evidence_reference
-from .evidence_metadata import compact, prepare_history
+from .evidence_metadata import compact, prepare_history, verified
 from .runtime import DEFAULT_ROOT
 ROOT = DEFAULT_ROOT
 
@@ -70,14 +70,40 @@ def verify_history(url, requests, root=ROOT, opener=None):
     write(root / relative, persisted)
     return {'evidence': evidence_reference(persisted), 'historical_demand_evidence': checked}
 
+
+def historical_subject(root, observation_id):
+    """Return only hash-verified, URL-bound historical metadata, never current availability."""
+    rows = load(root / 'pending-observations.json', {'observations': []})['observations']
+    rows += load(root / 'opportunity-registry.json', {'observation_pool': []})['observation_pool']
+    matches = [row for row in rows if row['observation_id'] == observation_id]
+    if not matches:
+        raise ValueError('Unknown observation identifier')
+    allowed = {url for row in matches for url in row.get('evidence_urls', []) + row.get('aliases', [])}
+    records = []
+    for path in sorted((root / 'page-evidence').glob('*.json')):
+        record = load(path, {})
+        if not isinstance(record, dict) or record.get('url') not in allowed or not verified(record):
+            continue
+        fields = {key: record.get(key) for key in ('url', 'title', 'checked_at', 'http_status',
+            'content_hash', 'metadata_hash', 'media_types', 'publication_dates', 'date_contexts')}
+        fields.update(evidence_file=path.relative_to(root).as_posix(), summary=record.get('summary', record.get('text', ''))[:500],
+            historical_snapshot=True, current_availability_verified=False)
+        records.append(fields)
+    return {'observation_id': observation_id, 'count': len(records), 'records': records}
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=ROOT)
     parser.add_argument('--observation-id', action='append', default=[])
     parser.add_argument('--verify-history', type=Path, help='JSON list of URL and short date-quote requests; refetches only in memory')
+    parser.add_argument('--history-for-observation', help='Read existing verified subject metadata; does not fetch or prove current availability')
     args = parser.parse_args(argv)
     with locked(args.root):
         recover(args.root)
+        if args.history_for_observation:
+            result = historical_subject(args.root, args.history_for_observation)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0 if result['count'] else 1
         if args.verify_history:
             requests = load(args.verify_history, None)
             if not isinstance(requests, list) or not requests:
