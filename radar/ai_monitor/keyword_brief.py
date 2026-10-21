@@ -136,10 +136,20 @@ def submit(root, briefs):
 
 
 def render(root, plan, blocked_ids=()):
-    lines, missing = [], []
+    lines, missing, excluded = [], [], []
     items = selected(root, plan, blocked_ids)
+    from .report_signal import reviews, validate as validate_signal
+    decisions = reviews(root, plan) if plan.get('execution_id') else {}
     for item in items:
         identifier = item['event_id']
+        try:
+            signal = validate_signal(root, plan, item, decisions.get(identifier))
+        except (ValueError, TypeError, KeyError) as error:
+            missing.append({'event_id': identifier, 'reason': 'Report signal review: ' + str(error)})
+            continue
+        if signal['decision'] == 'exclude':
+            excluded.append(identifier)
+            continue
         raw = load(root / 'keyword-briefs' / (identifier + '.json'), {})
         try:
             brief = validate(root, item, raw)
@@ -149,8 +159,7 @@ def render(root, plan, blocked_ids=()):
             missing.append({'event_id': identifier, 'reason': str(error)})
             continue
         platforms = '、'.join(brief['platforms'])
-        signal = ('新上线信号：' + platforms + '新上线相关模板' if item['eligibility']['priority_tier'] == 1
-                  else '跨平台出现：' + platforms + '出现同类玩法')
+        signal = signal['signal_text']
         lines.append('\n'.join([brief['main_term'],
             '近义/相关词建议：' + '；'.join(brief['related_terms']),
             '长尾词建议：' + '；'.join(brief['long_tail_terms']),
@@ -158,7 +167,8 @@ def render(root, plan, blocked_ids=()):
             '来源平台：' + platforms]))
     # The caller retains missing briefs as an internal failure, never as a claim
     # that an incomplete run found no opportunities.
-    return '\n\n'.join(lines) if lines else EMPTY, {'selected': len(items), 'missing': missing}
+    return '\n\n'.join(lines) if lines else EMPTY, {'selected': len(items), 'included':len(lines),
+                                                   'excluded':excluded, 'missing': missing}
 
 
 def main(argv=None):
@@ -178,7 +188,11 @@ def main(argv=None):
             else:
                 text, status = render(args.root, plan)
                 if status['missing']:
-                    raise ValueError('Required keyword briefs incomplete; see internal evidence records')
+                    raise ValueError('Required keyword briefs/report-signal reviews incomplete. Read '
+                        '/home/admin/.hermes/skills/ai-video-opportunity-monitor/SKILL.md report-signal section; '
+                        'run python -m radar.ai_monitor.report_signal candidates --root ROOT --execution-id ID, '
+                        'then semantic submit and verify; old backlog first review is not a new trend. '
+                        'Other ready review batches must continue; final delivery remains held until verified.')
                 result = {'text': text, **status}
     print(json.dumps(result, ensure_ascii=False))
 

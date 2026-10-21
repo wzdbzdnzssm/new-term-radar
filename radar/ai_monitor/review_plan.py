@@ -83,6 +83,11 @@ def progress(root, plan):
             'blocked_reason': plan.get('deferred', {}).get(item['observation_id'],
                 reviewed.get('blocked_reason', ''))})
     return {'execution_id': plan['execution_id'], 'planned': len(rows),
+            'report_signal_review': ('Before final completion read persistent Skill report-signal section; '
+                'run radar.ai_monitor.report_signal candidates, then independently review each event and '
+                'submit/verify. Old backlog first review, outbox/checked_at timestamps and navigation/hash '
+                'changes do not prove a new trend. Explicitly exclude historical stock without a real '
+                'window signal; keep reviewing all ready batches. No manual finish or mail.'),
             'recent_planned': plan.get('recent_discovery_count', 0),
             'completed': sum(r['completed'] for r in rows),
             'remaining': sum(not r['completed'] for r in rows), 'items': rows,

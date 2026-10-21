@@ -99,13 +99,22 @@ After each semantic review batch, use `python -m radar.ai_monitor.keyword_brief 
 --root ROOT --execution-id ID`, then `submit --root ROOT --input FILE` with
 evidence-bound briefs and `preview --root ROOT --execution-id ID`. Briefs live in
 `keyword-briefs/` and never modify the original outbox or ACK. Every selected P1/P2
-needs a valid brief before finalization; a missing brief is a recoverable internal
-failure, not a no-keyword report. Only a complete run with no selected terms emits
+needs an independent `report_signal` include/exclude review bound to its item hash,
+execution, report window and verified evidence. Internal historical P2 status or a
+late first review is not a new report signal. Use `python -m radar.ai_monitor.report_signal
+candidates --root ROOT --execution-id ID`, then semantic `submit --input FILE`
+and `verify` with the same root/execution arguments. Included items need a valid
+brief; explicitly excluded historical stock does not. A missing review/brief is a
+recoverable internal failure, not a no-keyword report. Only a complete run without included terms emits
 `本次暂无可发布的新趋势词`.
 Short reports are inline; long reports use a keyword overview in the email body
 plus a UTF-8 attachment identical to the complete cloud keyword report.
 The next report starts at the prior report day's confirmed coverage cutoff; same-day
-reruns retain that day's previously confirmed terms. Frozen reports record their exact
+reruns retain that day's terms only when their original real signal passes the same
+review. New supply can cite normal committed baseline additions (not initial scope,
+inventory or restored URLs), even without a detail publication date. Higgsfield
+persists small future `supply-deltas/` facts alongside its ordinary report transaction;
+missing historical pre-states are never reconstructed. Frozen reports record their exact
 window. Incomplete coverage, planned review, or remaining pending blocks every final
 keyword report, including a no-keyword result. Cloud and email have
 separate durable receipts; uncertain email sends reconcile the frozen sent body

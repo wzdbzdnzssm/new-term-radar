@@ -70,10 +70,14 @@ def test_single_uuid_and_new_card_on_unchanged_aggregate_url(tmp_path, monkeypat
 
     assert templates.run(tmp_path, fetcher=sitemap, page_reader=page) == 0
     assert store.load(tmp_path / 'latest-template-scan.json', {})['events'] == []
+    assert list((tmp_path/'supply-deltas').glob('*.json')) == []
     cards.append(second)  # no URL added to the sitemap, aggregate URL unchanged
     assert templates.run(tmp_path, fetcher=sitemap, page_reader=page) == 0
     events = store.load(tmp_path / 'latest-template-scan.json', {})['events']
     assert len(events) == 1 and events[0]['name'] == 'Bulin 47'
+    report=store.load(tmp_path/'latest-template-scan.json',{})
+    ref=report['aggregates'][0]['supply_delta'];delta=store.load(tmp_path/ref['path'],{})
+    assert delta['added_urls']==[second] and store.digest(delta)==ref['sha256']
     pool = store.load(tmp_path / 'video-template-candidates.json', {})
     candidate = pool['entities'][templates.identity(second)]
     assert candidate['handoff']['independent_demand'] == 'unverified'
@@ -86,6 +90,7 @@ def test_single_uuid_and_new_card_on_unchanged_aggregate_url(tmp_path, monkeypat
     # Same UUID seen in detail is one entity, despite card/detail routes.
     assert len(store.load(tmp_path / 'video-template-candidates.json', {})['entities']) == 2
     assert store.load(tmp_path / 'latest-template-scan.json', {})['events'] == []
+    assert 'supply_delta' not in store.load(tmp_path/'latest-template-scan.json',{})['feeds'][0]
     assert len(store.load(tmp_path / 'pending-observations.json', {})['observations']) == 1
 
 
@@ -103,6 +108,10 @@ def test_supplemental_change_enters_existing_review_queue(tmp_path, monkeypatch)
     templates.run(tmp_path, fetcher=sitemap, page_reader=page)
     urls.append('https://higgsfield.ai/blog/new')
     assert templates.run(tmp_path, fetcher=sitemap, page_reader=page) == 0
+    report=store.load(tmp_path/'latest-template-scan.json',{})
+    ref=report['feeds'][0]['supply_delta'];delta=store.load(tmp_path/ref['path'],{})
+    assert store.digest(delta)==ref['sha256'] and delta['added_urls']==[urls[-1]]
+    assert delta['baseline_created'] is False and delta['before_observed_at']
     rows = store.load(tmp_path / 'pending-observations.json', {})['observations']
     assert len(rows) == 1 and rows[0]['review_lane'] == 'supplemental_evidence'
     evidence = store.load(tmp_path / rows[0]['evidence'][0]['evidence_file'], {})

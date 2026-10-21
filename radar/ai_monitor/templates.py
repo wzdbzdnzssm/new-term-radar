@@ -153,6 +153,8 @@ def run(root, tier='core', fetcher=monitor.fetch_bytes, page_reader=review_pages
             key = identity(url)
             legacy_entities[key] = earliest_time(legacy_entities.get(key), seen)
         incoming = []
+        supply_deltas = []
+        known_entities = set(pool['entities']) | set(legacy_entities)
         timestamp = monitor.utc_now()
         report = {'observed_at': timestamp, 'tier': tier, 'status': 'ok', 'feeds': [], 'aggregates': [], 'events': [],
                   'notice': 'First inventory is historical; discovery is not publication, demand or generation validation.'}
@@ -259,6 +261,16 @@ def run(root, tier='core', fetcher=monitor.fetch_bytes, page_reader=review_pages
                 state['feeds'][route] = {'urls': accepted, 'observed_at': timestamp}
                 row.update(status='partial' if errors else 'ok', url_count=len(current), errors=errors,
                            baseline_created=old is None)
+                added_urls = [url for url in accepted if old is not None and url not in old['urls']
+                              and identity(url) not in known_entities]
+                if added_urls and not errors:
+                    delta = {'source_id':'higgsfield-ai','index_url':row['url'],'status':'ok',
+                             'baseline_created':False,'before_observed_at':old['observed_at'],
+                             'observed_at':timestamp,'added_urls':sorted(added_urls),
+                             'notice':'New index supply after established baseline; not demand birth or search heat.'}
+                    relative = 'supply-deltas/' + digest(delta) + '.json'
+                    supply_deltas.append(op(relative,delta))
+                    row['supply_delta'] = {'path':relative,'sha256':digest(delta)}
             except Exception as error:
                 row.update(status='error', error=type(error).__name__ + ': ' + str(error))
         for route in AGGREGATES if tier != 'core' else AGGREGATES[:2]:
@@ -300,6 +312,17 @@ def run(root, tier='core', fetcher=monitor.fetch_bytes, page_reader=review_pages
                         candidate(card['url'], card['name'], reference_hash=card['reference_hash'], inventory=old is None)
                 state['aggregates'][route] = {'cards': current, 'observed_at': timestamp}
                 row.update(status='ok', card_count=len(cards), baseline_created=old is None)
+                added_urls = [card['url'] for card in cards if old is not None
+                              and identity(card['url']) not in old['cards']
+                              and identity(card['url']) not in known_entities]
+                if added_urls:
+                    delta = {'source_id':'higgsfield-ai','index_url':row['url'],'status':'ok',
+                             'baseline_created':False,'before_observed_at':old['observed_at'],
+                             'observed_at':timestamp,'added_urls':sorted(set(added_urls)),
+                             'notice':'New index supply after established baseline; not demand birth or search heat.'}
+                    relative = 'supply-deltas/' + digest(delta) + '.json'
+                    supply_deltas.append(op(relative,delta))
+                    row['supply_delta'] = {'path':relative,'sha256':digest(delta)}
             except Exception as error:
                 row.update(status='unread', error=type(error).__name__ + ': ' + str(error))
         report['status'] = 'ok' if all(r['status'] == 'ok' for r in report['feeds'] + report['aggregates']) else 'partial'
@@ -307,7 +330,7 @@ def run(root, tier='core', fetcher=monitor.fetch_bytes, page_reader=review_pages
         pending['observations'] = merge_observations(pending['observations'], incoming)
         report['queued_observation_count'] = len(incoming)
         commit(root, 'template_scan', [op('template-state.json', state), op('video-template-candidates.json', pool),
-                                      op('pending-observations.json', pending), op('latest-template-scan.json', report)])
+                                      op('pending-observations.json', pending), op('latest-template-scan.json', report)] + supply_deltas)
         if snapshot is not None:
             snapshot.update(report)
         print(json.dumps(report, ensure_ascii=False))
