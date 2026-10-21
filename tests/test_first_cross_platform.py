@@ -133,12 +133,16 @@ def test_unchanged_old_word_cannot_be_called_a_recurrence_without_new_supply(opp
         report_signal.validate(root, plan, item, signal)
 
 
-@pytest.mark.parametrize('fault', ['single_platform', 'old_workflow', 'wrong_time'])
+@pytest.mark.parametrize('fault', ['single_platform', 'same_platform_aliases', 'old_workflow', 'wrong_time'])
 def test_cross_platform_claim_needs_two_sources_and_new_explicit_policy(opportunity, fault):
     root, item, brief, plan, signal = opportunity
     signal = copy.deepcopy(signal)
     if fault == 'single_platform':
         signal['evidence_refs'] = signal['evidence_refs'][:1]
+    elif fault == 'same_platform_aliases':
+        item = copy.deepcopy(item)
+        item['valid_evidence'][1]['source_id'] = item['valid_evidence'][0]['source_id']
+        signal['item_hash'] = digest(item)
     elif fault == 'old_workflow':
         write(root / 'monitor/config.json', {'sources': []})
     else:

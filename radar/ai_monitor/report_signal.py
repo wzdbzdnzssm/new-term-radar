@@ -106,7 +106,10 @@ def validate(root, plan, item, raw):
         from .report_history import enabled, published
         from .eligibility import website
         sites = {website(value['url']) for value in records}
-        if (not enabled(root, plan) or item['eligibility']['priority_tier'] != 2 or len(sites) < 2
+        cited = {(ref.get('evidence_file'), ref.get('content_hash')) for ref in refs}
+        sources = {row.get('source_id') for row in item['valid_evidence']
+                   if (row.get('evidence_file'), row.get('content_hash')) in cited and row.get('source_id')}
+        if (not enabled(root, plan) or item['eligibility']['priority_tier'] != 2 or len(sites) < 2 or len(sources) < 2
                 or (item.get('need_id') or item['id']) in published(root, plan)
                 or at != instant(plan['started_at'])):
             raise ValueError('First cross-platform opportunity requires unreported two-platform evidence in its new workflow')

@@ -90,7 +90,7 @@ def validate(root, item, raw):
     refs = raw.get('evidence_refs', [])
     if not isinstance(refs, list) or not refs:
         raise ValueError('Keyword brief requires reviewed evidence references')
-    names, sites, evidence = [], set(), []
+    names, sites, sources, evidence = [], set(), set(), []
     config = load(root / 'monitor/config.json', {'sources': []})
     brands = {source['id']: source.get('brand_name') or re.sub(r'\.(?:net|com|co|video|wiki)$', '', source['name'])
               for source in config['sources']}
@@ -115,13 +115,14 @@ def validate(root, item, raw):
             raise ValueError('Reviewed evidence needs a configured platform brand')
         names.append(public_text(brand, 'platform', 100))
         sites.add(website(record.get('url', row['url'])))
+        sources.add(row.get('source_id'))
         evidence.append({'evidence_file': key[0], 'content_hash': key[1]})
     if not named:
         raise ValueError('Main term needs a verbatim name quote from reviewed evidence')
     eligibility = item['eligibility']
     if eligibility['priority_tier'] == 1 and not (eligibility.get('fresh_48h') or eligibility.get('observed_new_supply')):
         raise ValueError('New-launch signal requires verified fresh publication')
-    if eligibility['priority_tier'] == 2 and len(sites) < 2:
+    if eligibility['priority_tier'] == 2 and (len(sites) < 2 or len(sources) < 2):
         raise ValueError('Cross-platform signal needs evidence from two real websites')
     result.update(name_quote=quote, evidence_refs=evidence, platforms=sorted(set(names)))
     return result
