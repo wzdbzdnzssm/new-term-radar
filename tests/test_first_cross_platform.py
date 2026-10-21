@@ -72,6 +72,13 @@ def test_queued_mail_does_not_mark_a_word_formally_published(opportunity):
     assert keyword_brief.selected(root, plan) == [item]
 
 
+@pytest.mark.parametrize('prefix,reported', [('原始线索名称/标题：', True), ('原始名称/标题：', False)])
+def test_legacy_formal_title_counts_but_an_observation_title_does_not(opportunity, prefix, reported):
+    root, item, brief, plan, signal = opportunity
+    delivery(root, prefix + 'Hotel Lobby AI Video Generator: Example', '2026-10-21T06:14:00Z')
+    assert ('hotel-lobby' in report_history.published(root, plan)) is reported
+
+
 def test_same_day_freeze_readback_and_rerun_stay_reproducible(opportunity):
     root, item, brief, plan, signal = opportunity
     report_signal.submit(root, plan, [signal])

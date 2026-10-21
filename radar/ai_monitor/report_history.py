@@ -43,6 +43,10 @@ def published(root, plan):
     for path in (root / 'keyword-briefs').glob('*.json'):
         brief = load(path, {})
         name = brief.get('main_term')
-        if name and brief.get('need_id') and any(re.search(r'(?m)^' + re.escape(name) + r'\s*$', text) for text in texts):
+        exact = any(re.search(r'(?m)^' + re.escape(name or '') + r'\s*$', text) for text in texts)
+        legacy = any(re.search(r'(?<!\w)' + re.escape(name or '') + r'(?!\w)', line, re.I)
+                     for text in texts for line in text.splitlines()
+                     if line.startswith('原始线索名称/标题：'))
+        if name and brief.get('need_id') and (exact or legacy):
             seen.add(brief['need_id'])
     return seen
