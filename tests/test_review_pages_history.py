@@ -33,6 +33,7 @@ def test_historical_subject_returns_verified_bound_compact_metadata_only(history
 
 def test_historical_query_cli_does_not_fetch_or_submit(history,monkeypatch,capsys):
     monkeypatch.setattr(review_pages,'fetch',lambda *args:pytest.fail('Must not fetch historical query'))
+    monkeypatch.setattr(review_pages,'recover',lambda *args:pytest.fail('Read-only query must not recover journals'))
     before=(history/'pending-observations.json').read_bytes()
     assert review_pages.main(['--root',str(history),'--history-for-observation','subject'])==0
     assert json.loads(capsys.readouterr().out)['count']==1

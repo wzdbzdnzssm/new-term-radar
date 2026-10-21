@@ -99,11 +99,11 @@ def main(argv=None):
     parser.add_argument('--history-for-observation', help='Read existing verified subject metadata; does not fetch or prove current availability')
     args = parser.parse_args(argv)
     with locked(args.root):
-        recover(args.root)
         if args.history_for_observation:
             result = historical_subject(args.root, args.history_for_observation)
             print(json.dumps(result, ensure_ascii=False))
             return 0 if result['count'] else 1
+        recover(args.root)
         if args.verify_history:
             requests = load(args.verify_history, None)
             if not isinstance(requests, list) or not requests:
