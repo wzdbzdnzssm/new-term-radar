@@ -2,6 +2,7 @@
 import argparse
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .eligibility import instant, website
@@ -30,9 +31,13 @@ def selected(root, plan, blocked_ids=()):
     needs = {}
     if not plan:
         return []
+    from .review_plan import report_window
+    start, _ = report_window(plan['started_at'])
+    start = instant(plan.get('report_window_start', start))
+    end = instant(plan.get('report_window_end', datetime.now(timezone.utc).isoformat()))
     for path in sorted((root / 'outbox').glob('*.json')):
         box = load(path, {})
-        if box.get('outbox_id') in blocked_ids or instant(box.get('created_at')) < instant(plan['started_at']):
+        if box.get('outbox_id') in blocked_ids or not start <= instant(box.get('created_at')) < end:
             continue
         for item in box.get('items', []):
             eligibility = item.get('eligibility', {})

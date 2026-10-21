@@ -71,3 +71,42 @@ def test_recovered_collection_appends_without_resetting_existing_work(tmp_path):
     assert result['started_at']==original['started_at']
     assert result['deferred']=={'a':'HTTP 403'}
     assert result['collection_run_id']=='new-config-batch' and result['collection_exit']==0
+
+
+def test_full_pending_plans_same_source_history_and_extends_late_discovery(tmp_path):
+    rows=[{'observation_id':str(i),'source_id':'same','first_seen':'2020-01-01T00:00:00Z'} for i in range(40)]
+    save(tmp_path/'pending-observations.json',{'observations':rows})
+    original=plan.create(tmp_path,'full',full_pending=True,report_window_start='2026-10-20T10:00:00Z')
+    assert len(original['items'])==40 and original['review_scope']=='all_pending'
+    assert original['report_window_start']=='2026-10-20T10:00:00Z'
+    rows.append({'observation_id':'late','source_id':'same','first_seen':'2020-01-01T00:00:00Z'})
+    save(tmp_path/'pending-observations.json',{'observations':rows})
+    extended=plan.extend_pending(tmp_path,original)
+    assert len(extended['items'])==41
+    assert len(plan.extend_pending(tmp_path,extended)['items'])==41
+    assert extended['started_at']==original['started_at']
+
+
+def test_collection_snapshot_survives_later_scans(tmp_path):
+    save(tmp_path/'pending-observations.json',{'observations':[]})
+    original=plan.create(tmp_path,'full',full_pending=True)
+    scan={'run_id':'original','status':'ok','scan_phase':'complete','source_count':59}
+    save(tmp_path/'latest-scan.json',scan)
+    save(tmp_path/'latest-template-scan.json',{'status':'ok','tier':'daily'})
+    result=plan.bind_collection(tmp_path,'full',0)
+    save(tmp_path/'latest-scan.json',{'run_id':'later'})
+    assert result['collection_scan']==scan
+    assert result['supplemental_scans']['latest-template-scan.json']['tier']=='daily'
+
+
+def test_bind_uses_actual_collector_snapshots_even_if_latest_already_changed(tmp_path):
+    save(tmp_path/'pending-observations.json',{'observations':[]})
+    plan.create(tmp_path,'full',full_pending=True)
+    save(tmp_path/'latest-scan.json',{'run_id':'other-execution'})
+    save(tmp_path/'latest-template-scan.json',{'status':'ok','tier':'core'})
+    snapshots={'scan':{'run_id':'this-execution','source_count':59},
+               'latest-template-scan.json':{'status':'ok','tier':'weekly'},
+               'latest-pippit-template-scan.json':{'status':'ok'}}
+    result=plan.bind_collection(tmp_path,'full',0,snapshots=snapshots)
+    assert result['collection_run_id']=='this-execution'
+    assert result['supplemental_scans']['latest-template-scan.json']['tier']=='weekly'

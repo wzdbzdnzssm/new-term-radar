@@ -71,6 +71,19 @@ def test_missing_brief_is_internal_gap_not_silent_success(case):
     assert status['missing'][0]['event_id'] not in text
 
 
+def test_report_window_includes_prior_plan_and_midnight_but_excludes_already_covered_and_future(case):
+    root,item,brief,plan=case
+    plan.update(started_at='2026-10-21T03:00:00Z',report_window_start='2026-10-20T10:00:00Z',
+                report_window_end='2026-10-21T04:00:00Z')
+    for name,stamp in [('covered','2026-10-20T09:59:00Z'),('evening','2026-10-20T12:00:00Z'),
+                       ('banana','2026-10-21T00:30:00Z'),('after-cutoff','2026-10-21T04:00:00Z')]:
+        current={**item,'id':name,'event_id':digest(name)}
+        (root/('outbox/'+name+'.json')).write_text(json.dumps({'outbox_id':name,'created_at':stamp,'items':[current]}))
+    assert {row['id'] for row in selected(root,plan)}=={'evening','banana'}
+    plan.update(report_window_start='2026-10-21T04:00:00Z',report_window_end='2026-10-22T00:00:00Z')
+    assert {row['id'] for row in selected(root,plan)}=={'after-cutoff'}
+
+
 @pytest.mark.parametrize('field,value', [
     ('main_term', 'photo-cap-toss-dance'), ('main_term', 'Made Up Trend'),
     ('seo_advice', '请做好SEO优化并快速上线以获取更多流量'),

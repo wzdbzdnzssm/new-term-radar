@@ -52,7 +52,7 @@ def wait_worker(command, log, inherited_lock):
     process.returncode = os.waitstatus_to_exitcode(status)
     return process.returncode, usage.ru_maxrss
 
-def run(root, selected=None, memory_mib=DEFAULT_MEMORY_MIB, run_day=None):
+def run(root, selected=None, memory_mib=DEFAULT_MEMORY_MIB, run_day=None, snapshot=None, execution_id=None):
     from .queue_store import monitor, load, write, locked, recover, digest
     root = root.resolve()
     if memory_mib <= 0: raise ValueError("memory_mib must be positive")
@@ -67,7 +67,9 @@ def run(root, selected=None, memory_mib=DEFAULT_MEMORY_MIB, run_day=None):
         if len(set(ids)) != len(ids) or any(not re.fullmatch(r"[a-zA-Z0-9_-]+", sid) for sid in ids):
             raise ValueError("Source IDs must be unique safe path components")
         fingerprint = digest({"sources": sources, "fetch": config.get("fetch", {})})
-        relative = "batch-runs/" + day + "-" + fingerprint[:16]
+        if execution_id is not None and not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', execution_id):
+            raise ValueError('Invalid collection execution identifier')
+        relative = "batch-runs/" + day + "-" + fingerprint[:16] + ("-" + execution_id if execution_id else "")
         directory = root / relative
         progress_path = directory / "progress.json"
         progress = load(progress_path, {"schema_version": 1, "run_id": directory.name, "run_day": day,
@@ -180,6 +182,8 @@ def run(root, selected=None, memory_mib=DEFAULT_MEMORY_MIB, run_day=None):
             publish("running")
         progress["phase"] = "complete"; progress["finished_at"] = monitor.utc_now(); write(progress_path, progress)
         manifest = publish("complete")
+        if snapshot is not None:
+            snapshot.update(manifest)
         print(json.dumps(manifest, ensure_ascii=False))
         return 0 if manifest["status"] == "ok" else 1
 

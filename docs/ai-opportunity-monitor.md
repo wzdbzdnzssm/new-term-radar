@@ -74,21 +74,23 @@ The original P1/P2/P3, live full-page verification, historical-age veto, stable 
 deduplication and real delivery receipt requirements remain in force.
 
 The native daily pre-run persists a review plan bound to its verified execution. It
-includes every pending discovery first seen within 48 hours (discovery does not
-prove demand age), followed by source-fair backlog work. Review batches contain up
+includes all pending discoveries and historical backlog (discovery does not
+prove demand age), with recent and source-fair work first. Review batches contain up
 to 16 entries; this is a fetch batch size, not a daily review or P1 output cap.
 Submissions still use the existing evidence and semantic review contract. Progress
 counts only accepted/watch/excluded decisions submitted after the plan began;
-blocked items and unfinished batches remain visible and rotate in later plans.
+blocked items and unfinished batches remain incomplete. Late arrivals extend the
+same plan. Collection receipts use execution-specific batches and snapshots captured
+inside the collectors' locks, so a later silent scan cannot replace the bound facts.
 
-Hermes' AI-only completion route writes only newly featured P1/P2 keyword briefs
+Hermes' AI-only completion route writes only eligible P1/P2 keyword briefs in the report window
 to the existing cloud table and privately configured email recipient, deduplicated
 by stable need ID without a P1 count limit. Each entry has a source-named main
 term, suggested related and long-tail terms, specific SEO advice, an actual launch
 or cross-platform signal, and platform brands. Suggestions are not observed search
 queries. Same-intent variants share one page; distinct intent can justify a new page.
 Evidence URLs, P3 observations, collection/review counts and failures remain internal.
-After semantic review, use `python -m radar.ai_monitor.keyword_brief candidates
+After each semantic review batch, use `python -m radar.ai_monitor.keyword_brief candidates
 --root ROOT --execution-id ID`, then `submit --root ROOT --input FILE` with
 evidence-bound briefs and `preview --root ROOT --execution-id ID`. Briefs live in
 `keyword-briefs/` and never modify the original outbox or ACK. Every selected P1/P2
@@ -97,7 +99,10 @@ failure, not a no-keyword report. Only a complete run with no selected terms emi
 `本次暂无可发布的新趋势词`.
 Short reports are inline; long reports use a keyword overview in the email body
 plus a UTF-8 attachment identical to the complete cloud keyword report.
-Incomplete planned review or coverage cannot become a successful no-keyword result. Cloud and email have
+The next report starts at the prior report day's confirmed coverage cutoff; same-day
+reruns retain that day's previously confirmed terms. Frozen reports record their exact
+window. Incomplete coverage, planned review, or remaining pending blocks every final
+keyword report, including a no-keyword result. Cloud and email have
 separate durable receipts; uncertain email sends reconcile the frozen sent body
 and download the sent attachment to verify its full-content hash before any resend. A sent-folder receipt confirms provider acceptance/sent copy,
 not recipient inbox placement. Existing opportunity outboxes and their ACKs remain

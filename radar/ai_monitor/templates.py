@@ -140,7 +140,7 @@ def handoff(name, summary, url):
             'source_url': url}
 
 
-def run(root, tier='core', fetcher=monitor.fetch_bytes, page_reader=review_pages.read_page):
+def run(root, tier='core', fetcher=monitor.fetch_bytes, page_reader=review_pages.read_page, snapshot=None):
     root = Path(root).resolve()
     with batch_lock(root), locked(root):
         recover(root)
@@ -308,6 +308,8 @@ def run(root, tier='core', fetcher=monitor.fetch_bytes, page_reader=review_pages
         report['queued_observation_count'] = len(incoming)
         commit(root, 'template_scan', [op('template-state.json', state), op('video-template-candidates.json', pool),
                                       op('pending-observations.json', pending), op('latest-template-scan.json', report)])
+        if snapshot is not None:
+            snapshot.update(report)
         print(json.dumps(report, ensure_ascii=False))
         return 0 if report['status'] == 'ok' else 1
 

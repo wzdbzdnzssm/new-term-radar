@@ -181,3 +181,18 @@ def test_daily_consumes_pippit_after_configured_sitemap_sources(radar, monkeypat
     monkeypatch.setattr(daily.pippit, 'run', lambda root: calls.append('pippit') or 1)
     assert daily.main(['--root', str(radar)]) == 1
     assert calls == ['sitemaps', 'higgs', 'pippit']
+
+
+def test_daily_snapshots_and_execution_are_bound_before_shared_latest_can_change(radar, monkeypatch):
+    snapshots={}
+    def scan(root,snapshot,execution_id):
+        assert execution_id=='native-id';snapshot.update(run_id='native-id',status='ok');return 0
+    def higgs(root,tier,snapshot):
+        assert tier=='weekly';snapshot.update(status='ok',tier=tier);return 0
+    def pip(root,snapshot):snapshot.update(status='ok');return 0
+    monkeypatch.setattr(daily.scheduled_scan,'run',scan)
+    monkeypatch.setattr(daily.templates,'run',higgs)
+    monkeypatch.setattr(daily.pippit,'run',pip)
+    assert daily.main(['--root',str(radar),'--tier','weekly'],snapshots=snapshots,execution_id='native-id')==0
+    assert snapshots['scan']['run_id']=='native-id'
+    assert snapshots['latest-template-scan.json']['tier']=='weekly'

@@ -117,11 +117,14 @@ def configured(root):
                for source in load(Path(root) / 'monitor/config.json', {}).get('sources', []))
 
 
-def run(root, page_reader=review_pages.read_page):
+def run(root, page_reader=review_pages.read_page, snapshot=None):
     root = Path(root).resolve()
     with batch_lock(root), locked(root):
         recover(root)
-        return run_locked(root, page_reader)
+        result = run_locked(root, page_reader)
+        if snapshot is not None:
+            snapshot.update(load(root / 'latest-pippit-template-scan.json', {}))
+        return result
 
 
 def run_locked(root, page_reader):
