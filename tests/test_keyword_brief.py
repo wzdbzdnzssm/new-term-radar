@@ -60,9 +60,10 @@ def test_bound_brief_renders_only_business_fields_without_mutating_outbox(case):
     submit(root, [brief])
     text, status = render(root, plan)
     assert status == {'selected': 1, 'included':1, 'excluded':[], 'missing': []}
-    for value in ('Named Dance AI', '近义/相关词建议', '长尾词建议', 'SEO建议', '新上线信号', 'First', 'Second'):
+    for value in ('Named Dance AI', '| 新词 | 近义词 | 长尾词 | 信息来源 |', 'First', 'Second'):
         assert value in text
-    for value in ('http', '.com', '.net', item['id'], item['event_id'], '扫描', '审核', 'P3', 'SHA', '执行'):
+    for value in ('http', '.com', '.net', item['id'], item['event_id'], '扫描', '审核', 'P3', 'SHA', '执行',
+                  'SEO建议', '趋势信号', '新上线信号'):
         assert value not in text
     assert (root / 'outbox/box.json').read_bytes() == old
 
@@ -106,7 +107,7 @@ def test_report_window_includes_prior_plan_and_midnight_but_excludes_already_cov
     ('seo_advice', '请做好SEO优化并快速上线以获取更多流量'),
     ('seo_advice', 'Named Dance AI visit https://example.com to optimize the page'),
     ('related_terms', ['free Named Dance AI']), ('long_tail_terms', ['no watermark dance']),
-    ('related_terms', []), ('long_tail_terms', ['example.com/dance']),
+    ('related_terms', 'invalid'), ('long_tail_terms', ['example.com/dance']),
     ('seo_advice', 'Named Dance AI扫描失败，队列392条待处理，之后再做页面。'),
     ('seo_advice', 'Named Dance AI运行失败，请检查运行状态并恢复该任务。'),
 ])
@@ -119,6 +120,25 @@ def test_rejects_empty_unbound_generic_or_unsupported_content(case, field, value
 
 def test_scan_effect_name_is_not_an_operations_label():
     assert public_text('X-ray扫描AI', 'main_term') == 'X-ray扫描AI'
+
+
+def test_brief_can_omit_seo_and_leave_unsubstantiated_suggestions_empty(case):
+    root, item, brief, plan = case
+    brief.pop('seo_advice')
+    brief['related_terms'] = []
+    brief['long_tail_terms'] = []
+    submit(root, [brief])
+    text, status = render(root, plan)
+    assert status['missing'] == []
+    assert '| Named Dance AI |  |  | First、Second |' in text
+    assert 'SEO' not in text and '趋势信号' not in text
+
+
+def test_table_escapes_source_named_vertical_bars(case):
+    root, item, brief, plan = case
+    brief['related_terms'] = ['dance | cap toss']
+    submit(root, [brief])
+    assert 'dance \\| cap toss' in render(root, plan)[0]
 
 
 def test_rejects_wrong_hash_and_p2_single_platform(case):
@@ -153,7 +173,8 @@ def test_p2_only_claims_observed_platform_coverage(case):
     signal=_signal(item,plan);signal.update(signal_kind='new_supply',signal_text='跨平台新增供给：First发布同类玩法，Second已有相关模板')
     submit_signals(root,plan,[signal])
     text, _ = render(root, plan)
-    assert '跨平台新增供给：First发布同类玩法，Second已有相关模板' in text
+    assert '| 新词 | 近义词 | 长尾词 | 信息来源 |' in text and 'First、Second' in text
+    assert '跨平台新增供给' not in text
     assert '搜索量' not in text and '新上线信号' not in text
 
 
@@ -259,6 +280,26 @@ def test_supply_query_keeps_shanghai_after_midnight_directory_on_previous_utc_da
     path=root/'batch-runs/2026-10-21-batch/sources/first/1-receipt.json'
     path.parent.mkdir(parents=True);path.write_text(json.dumps(value))
     assert supply_evidence(root,plan,[item])[0]['url']=='https://first.com/dance'
+
+
+def test_supply_query_preserves_all_sources_with_legacy_missing_source_rows(case):
+    root,item,brief,plan=case
+    before=copy.deepcopy(item)
+    expected=[]
+    for source in ('first','second'):
+        url='https://'+source+'.com/dance'
+        relative='batch-runs/2026-10-20-batch/sources/'+source+'/1-receipt.json'
+        value={'status':'committed','source_id':source,'result':{'status':'ok',
+            'baseline_created':False,'observed_at':'2026-10-20T08:00:00Z',
+            'added':[{'url':url,'first_seen':'2026-10-20T08:00:00Z'}]}}
+        path=root/relative;path.parent.mkdir(parents=True);path.write_text(json.dumps(value))
+        expected.append((source,url))
+    item['valid_evidence'].extend([{'url':'https://legacy.com/dance'},
+        {'source_id':None,'url':'https://legacy.com/other'}])
+    original=copy.deepcopy(item)
+    actual=supply_evidence(root,plan,[item])
+    assert sorted((row['source_id'],row['url']) for row in actual)==expected
+    assert item==original and item['valid_evidence'][:len(before['valid_evidence'])]==before['valid_evidence']
 
 
 @pytest.mark.parametrize('hold,missing', [('report_signal_review_required',False),

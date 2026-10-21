@@ -22,6 +22,14 @@ cross-platform opportunities without requiring a new publication in this window.
 Set `delivery_receipts_dir` to the existing daily delivery receipts directory;
 only complete deliveries with verified cloud and sent-copy hashes establish prior
 business publication. Internal opportunity ACKs do not mean the word was emailed.
+Optional `manual_delivery_receipts_dir` points to separate `manual_trial` receipts.
+Only complete deliveries with matching body/cloud/sent-copy hashes and confirmed
+channel statuses count from the following Shanghai day. Their explicit
+`published_need_ids` preserve publication history; `published_items[].source_urls`
+contains `{source_id, url}` pairs to recognize the same subject if a later review
+rebuilds its need ID. Already delivered source URLs cannot become new-supply or
+recurrence signals merely because production first discovers them later. Real new
+source URLs remain eligible for ordinary evidence-bound review.
 Historical words are labelled as first business inclusion, without recent-growth
 or first-launch claims. Same-day reruns retain their original report window.
 Previously published words with a real new source/page addition use a compact
@@ -113,10 +121,14 @@ HTTP failures stay recorded; the query does not fetch, classify or submit decisi
 
 Hermes' AI-only completion route writes only eligible P1/P2 keyword briefs in the report window
 to the existing cloud table and privately configured email recipient, deduplicated
-by stable need ID without a P1 count limit. Each entry has a source-named main
-term, suggested related and long-tail terms, specific SEO advice, an actual launch
-or cross-platform signal, and platform brands. Suggestions are not observed search
-queries. Same-intent variants share one page; distinct intent can justify a new page.
+by stable need ID without a P1 count limit. Reports use four columns: main term,
+related terms, long-tail terms and source platforms. New supply and historical
+cross-platform first inclusion have separate tables. Previously delivered same-day
+words retain only their name and sources; recurrence rows contain only the name,
+this round's platform and cumulative platform count. SEO advice and internal signal
+reviews stay out of the report. Suggestions may be empty when unsupported; an SEO
+advice field is optional and retained only for old brief compatibility. Suggestions
+are not observed search queries.
 Evidence URLs, P3 observations, collection/review counts and failures remain internal.
 After each semantic review batch, use `python -m radar.ai_monitor.keyword_brief candidates
 --root ROOT --execution-id ID`, then `submit --root ROOT --input FILE` with

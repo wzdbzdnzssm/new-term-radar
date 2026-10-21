@@ -55,7 +55,7 @@ def test_historical_two_platform_unreported_word_can_be_first_business_inclusion
     report_signal.submit(root, plan, [signal])
     text, status = keyword_brief.render(root, plan)
     assert status['included'] == 1 and status['included_need_ids'] == ['hotel-lobby']
-    assert '首次纳入机会日报' in text and 'http' not in text
+    assert '历史跨平台首次纳入' in text and 'http' not in text
 
 
 def test_real_past_business_delivery_prevents_repeat_but_internal_ack_does_not(opportunity):
@@ -73,6 +73,94 @@ def test_queued_mail_does_not_mark_a_word_formally_published(opportunity):
     assert keyword_brief.selected(root, plan) == [item]
 
 
+def manual_delivery(root):
+    config = review_queue.load(root / 'monitor/config.json', {})
+    config['review_workflow']['manual_delivery_receipts_dir'] = str(root / 'manual-deliveries')
+    write(root / 'monitor/config.json', config)
+    text = 'Hotel Lobby AI\nManual trial report'
+    record = {'report_kind': 'manual_trial', 'execution_id': 'manual-now',
+        'created_at': '2026-10-21T07:00:00Z', 'report_date': '2026-10-21', 'complete': True,
+        'text': text, 'text_hash': digest(text),
+        'published_need_ids': ['trial-need-' + str(n) for n in range(37)],
+        'published_items': [{'need_id': 'trial-need-0', 'main_term': 'Hotel Lobby AI',
+            'source_urls': [{'source_id': 'first', 'url': 'https://first.com/es/hotel-lobby-ai/'}]}],
+        'base_receipt': {'status': 'confirmed_base', 'text_hash': digest(text)},
+        'mail_receipt': {'status': 'verified_sent', 'text_hash': digest(text)}}
+    write(root / 'manual-deliveries/trial.json', record)
+    return record
+
+
+def test_verified_manual_delivery_publishes_all_ids_and_matches_rebuilt_need_by_subject(opportunity):
+    root, item, brief, plan, signal = opportunity
+    record = manual_delivery(root)
+    before = (root / 'outbox/old.json').read_bytes()
+    assert report_history.published(root, plan) == set(record['published_need_ids']) | {'hotel-lobby'}
+    assert keyword_brief.selected(root, plan) == []
+    with pytest.raises(ValueError, match='unreported'):
+        report_signal.validate(root, plan, item, signal)
+    assert (root / 'outbox/old.json').read_bytes() == before
+
+
+def test_manual_subject_mapping_does_not_match_another_platform_with_the_same_path(opportunity):
+    root, item, brief, plan, signal = opportunity
+    record = manual_delivery(root)
+    need = dict(item, valid_evidence=[row for row in item['valid_evidence']
+                                     if row['source_id'] == 'second'])
+    write(root / 'opportunity-registry.json', {'opportunities': [need]})
+    assert report_history.published(root, plan) == set(record['published_need_ids'])
+
+
+@pytest.mark.parametrize('fault', ['queued_mail', 'base_unconfirmed', 'base_hash', 'mail_hash',
+    'body_hash', 'incomplete', 'wrong_kind', 'same_day', 'future', 'report_date'])
+def test_unverified_or_same_day_manual_delivery_does_not_publish_or_suppress_subject(opportunity, fault):
+    root, item, brief, plan, signal = opportunity
+    record = manual_delivery(root)
+    if fault == 'queued_mail': record['mail_receipt']['status'] = 'queued'
+    elif fault == 'base_unconfirmed': record['base_receipt']['status'] = 'queued'
+    elif fault == 'base_hash': record['base_receipt']['text_hash'] = 'wrong'
+    elif fault == 'mail_hash': record['mail_receipt']['text_hash'] = 'wrong'
+    elif fault == 'body_hash': record['text_hash'] = 'wrong'
+    elif fault == 'incomplete': record['complete'] = False
+    elif fault == 'wrong_kind': record['report_kind'] = 'daily'
+    elif fault in {'same_day', 'future'}:
+        day = '2026-10-22' if fault == 'same_day' else '2026-10-23'
+        record.update(report_date=day, created_at=day + 'T00:10:00Z')
+    else: record['report_date'] = '2026-10-20'
+    write(root / 'manual-deliveries/trial.json', record)
+    assert report_history.published(root, plan) == set()
+    assert report_history.manual_subjects(root, plan) == set()
+    assert keyword_brief.selected(root, plan) == [item]
+
+
+@pytest.mark.parametrize('kind', ['new_supply', 'recurrence'])
+@pytest.mark.parametrize('new_subject', [False, True])
+def test_manual_delivery_rejects_only_previously_sent_source_url_supply(opportunity, kind, new_subject):
+    root, item, brief, plan, signal = opportunity
+    record = manual_delivery(root)
+    record['published_need_ids'].append(item['id'])
+    write(root / 'manual-deliveries/trial.json', record)
+    url = 'https://first.com/' + ('different-hotel-lobby-ai' if new_subject else 'hotel-lobby-ai')
+    value = path_evidence.create(root, url, source_id='first', supply_at=plan['started_at'])
+    ref = {key: value[key] for key in ('url', 'source_id', 'evidence_file', 'content_hash')}
+    item['valid_evidence'].append(ref)
+    path = 'batch-runs/2026-10-22-run/sources/first/1-receipt.json'
+    receipt = {'status': 'committed', 'source_id': 'first', 'result': {'status': 'ok',
+        'baseline_created': False, 'observed_at': plan['started_at'],
+        'added': [{'url': url, 'first_seen': plan['started_at']}]}}
+    write(root / path, receipt)
+    signal.update(signal_kind=kind, item_hash=digest(item), signal_quote=value['title'],
+        evidence_refs=[ref], supply_receipt={'path': path, 'sha256': digest(receipt),
+            'source_id': 'first', 'url': url})
+    if new_subject:
+        assert report_signal.validate(root, plan, item, signal)['signal_kind'] == kind
+        if kind == 'recurrence':
+            (root / ('keyword-briefs/' + item['event_id'] + '.json')).unlink()
+            assert keyword_brief.recurrence_line(root, item, signal, plan).startswith('Hotel Lobby AI：')
+    else:
+        with pytest.raises(ValueError, match='already formally delivered'):
+            report_signal.validate(root, plan, item, signal)
+
+
 @pytest.mark.parametrize('prefix,reported', [('原始线索名称/标题：', True), ('原始名称/标题：', False)])
 def test_legacy_formal_title_counts_but_an_observation_title_does_not(opportunity, prefix, reported):
     root, item, brief, plan, signal = opportunity
@@ -86,6 +174,26 @@ def test_same_day_freeze_readback_and_rerun_stay_reproducible(opportunity):
     text, before = keyword_brief.render(root, plan)
     delivery(root, text, '2026-10-22T00:10:00Z')
     assert keyword_brief.render(root, plan) == (text, before)
+
+
+def test_same_day_already_delivered_word_does_not_repeat_its_keyword_package(opportunity):
+    root, item, brief, plan, signal = opportunity
+    report_signal.submit(root, plan, [signal])
+    delivery(root, '| 新词 | 近义词 | 长尾词 | 信息来源 |\n'
+             '| --- | --- | --- | --- |\n| Hotel Lobby AI | old related | old tail | First |',
+             '2026-10-21T23:50:00Z')
+    text, status = keyword_brief.render(root, plan)
+    assert status['missing'] == [] and status['included'] == 1
+    assert '今日已报' in text and '| Hotel Lobby AI |  |  | First、Second |' in text
+    assert 'hotel lobby video template' not in text and 'make a Hotel Lobby AI video' not in text
+
+
+def test_table_delivery_is_recognized_as_prior_formal_publication(opportunity):
+    root, item, brief, plan, signal = opportunity
+    delivery(root, '| 新词 | 近义词 | 长尾词 | 信息来源 |\n'
+             '| --- | --- | --- | --- |\n| Hotel Lobby AI | related | tail | First |',
+             '2026-10-21T06:14:00Z')
+    assert report_history.published(root, plan) == {'hotel-lobby'}
 
 
 def test_reported_word_new_third_source_emits_only_one_compact_recurrence(opportunity):
@@ -121,7 +229,8 @@ def test_reported_word_new_third_source_emits_only_one_compact_recurrence(opport
     report_signal.submit(root, plan, [signal])
     text, status = keyword_brief.render(root, plan)
     assert status['included'] == 1 and status['missing'] == []
-    assert text == 'Hotel Lobby AI：本轮又在Third出现；累计已在3个平台发现（First、Second、Third）。'
+    assert '| Hotel Lobby AI |  |  | 本轮又在Third出现；累计已在3个平台发现。 |' in text
+    assert '复现' in text and 'SEO' not in text and 'hotel lobby video template' not in text
     assert not (root / ('keyword-briefs/' + item['event_id'] + '.json')).exists()
 
 

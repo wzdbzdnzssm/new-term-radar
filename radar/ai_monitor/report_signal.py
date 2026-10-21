@@ -37,7 +37,7 @@ def quoted(value, quote):
                                   + [row.get('excerpt', '') for row in value.get('date_contexts', [])]))
 
 
-def validate_supply(root, item, raw, at):
+def validate_supply(root, item, raw, at, plan):
     from .queue_store import canonical_path
     ref = raw.get('supply_receipt', {})
     path = (root / ref.get('path', '')).resolve()
@@ -68,6 +68,9 @@ def validate_supply(root, item, raw, at):
             raise ValueError('Supply requires a real persisted index delta after an established baseline')
     else:
         raise ValueError('Supply must reference a collector receipt or persisted index delta')
+    from .report_history import manual_subjects
+    if (source, canonical_path(url, {'id': source})) in manual_subjects(root, plan):
+        raise ValueError('Supply source URL was already formally delivered; exclude unchanged supply')
 
 
 def validate(root, plan, item, raw):
@@ -118,9 +121,9 @@ def validate(root, plan, item, raw):
         if (not enabled(root, plan) or (item.get('need_id') or item['id']) not in published(root, plan)
                 or not raw.get('supply_receipt')):
             raise ValueError('Recurrence needs prior formal publication and an actual new source appearance')
-        validate_supply(root, item, raw, at)
+        validate_supply(root, item, raw, at, plan)
     elif kind == 'new_supply' and raw.get('supply_receipt'):
-        validate_supply(root,item,raw,at)
+        validate_supply(root,item,raw,at,plan)
     elif kind in {'publication', 'new_supply'}:
         dates = [instant(row['published_at']) for row in publication_dates(current) if not row.get('veto_only')]
         if at not in dates:
@@ -153,7 +156,8 @@ def reviews(root, plan):
 def supply_evidence(root, plan, items):
     """Index existing collector facts only; never manufacture missing pre-states."""
     start,end=map(instant,window(plan));result=[]
-    sources={row.get('source_id') for item in items for row in item.get('valid_evidence',[])}
+    sources={row['source_id'] for item in items for row in item.get('valid_evidence',[])
+             if isinstance(row.get('source_id'), str) and row['source_id']}
     for directory in sorted((root/'batch-runs').glob('*')):
         if not start.astimezone(ZoneInfo('Asia/Shanghai')).date().isoformat() <= directory.name[:10] <= end.astimezone(ZoneInfo('Asia/Shanghai')).date().isoformat():
             continue
@@ -175,7 +179,7 @@ def supply_evidence(root, plan, items):
                 'source_id':value['source_id'],'url':url,'signal_at':value['observed_at']} for url in value['added_urls'])
     from .queue_store import canonical_path
     subjects={(row['source_id'],canonical_path(row['url'],{'id':row['source_id']}))
-              for item in items for row in item.get('valid_evidence',[])}
+              for item in items for row in item.get('valid_evidence',[]) if row.get('source_id') in sources}
     return [row for row in result if (row['source_id'],canonical_path(row['url'],{'id':row['source_id']})) in subjects]
 
 
@@ -234,6 +238,10 @@ def main():
             if enabled(args.root, plan):
                 from .report_history import published
                 result['previously_reported_need_ids'] = sorted(published(args.root, plan))
+                from .report_history import manual_subjects
+                result['previously_delivered_source_paths'] = [
+                    {'source_id': source, 'canonical_path': path}
+                    for source, path in sorted(manual_subjects(args.root, plan))]
                 result['first_cross_platform_signal_at'] = plan['started_at']
                 result['first_cross_platform_notice'] = 'First business inclusion only; never publication time or recent trend growth.'
         elif args.command == 'submit':

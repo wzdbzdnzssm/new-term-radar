@@ -75,16 +75,17 @@ def validate(root, item, raw):
     result = {'event_id': item['event_id'], 'need_id': item.get('need_id') or item['id'],
               'item_hash': digest(item), 'main_term': main}
     for field in ('related_terms', 'long_tail_terms'):
-        values = raw.get(field)
-        if not isinstance(values, list) or not 1 <= len(values) <= 8:
+        values = raw.get(field, [])
+        if not isinstance(values, list) or len(values) > 8:
             raise ValueError('Keyword brief requires ' + field)
         result[field] = list(dict.fromkeys(public_text(value, field, 180) for value in values))
         if any(UNSUPPORTED.search(value) for value in result[field]):
             raise ValueError('Unsupported capability promise in keyword suggestions')
-    result['seo_advice'] = public_text(raw.get('seo_advice'), 'seo_advice', 500)
-    if (len(result['seo_advice']) < 24 or UNSUPPORTED.search(result['seo_advice'])
-            or main.casefold() not in result['seo_advice'].casefold()):
-        raise ValueError('Specific, supportable SEO advice required')
+    if raw.get('seo_advice'):
+        result['seo_advice'] = public_text(raw['seo_advice'], 'seo_advice', 500)
+        if (len(result['seo_advice']) < 24 or UNSUPPORTED.search(result['seo_advice'])
+                or main.casefold() not in result['seo_advice'].casefold()):
+            raise ValueError('Specific, supportable SEO advice required')
     allowed = {(row.get('evidence_file'), row.get('content_hash')): row
                for row in item.get('valid_evidence', [])}
     refs = raw.get('evidence_refs', [])
@@ -151,10 +152,20 @@ def submit(root, briefs):
     return {'saved': len(operations)}
 
 
-def recurrence_line(root, item, signal):
+def recurrence_line(root, item, signal, plan=None):
     key = item.get('need_id') or item['id']
     names = [row['main_term'] for row in (load(path, {}) for path in (root / 'keyword-briefs').glob('*.json'))
              if row.get('need_id') == key and row.get('main_term')]
+    if not names and plan:
+        from .report_history import manual_deliveries
+        from .queue_store import canonical_path
+        subjects = {(row.get('source_id'), canonical_path(row['url'], {'id': row.get('source_id')}))
+                    for row in item.get('valid_evidence', []) if row.get('url')}
+        names = [published['main_term'] for record in manual_deliveries(root, plan)
+                 for published in record.get('published_items', []) if published.get('main_term')
+                 and (published.get('need_id') == key or any(
+                     (row.get('source_id'), canonical_path(row['url'], {'id': row.get('source_id')})) in subjects
+                     for row in published.get('source_urls', []) if row.get('url')))]
     if not names:
         raise ValueError('Recurrence needs the prior published keyword name')
     name = public_text(names[0], 'main_term', 140)
@@ -180,9 +191,17 @@ def recurrence_line(root, item, signal):
 
 def render(root, plan, blocked_ids=()):
     lines, missing, excluded = [], [], []
+    tables = {}
     items = selected(root, plan, blocked_ids)
     from .report_signal import reviews, validate as validate_signal
     decisions = reviews(root, plan) if plan.get('execution_id') else {}
+    from .report_history import enabled, published
+    already_today = published(root, plan, same_day=True) if enabled(root, plan) else set()
+    def cell(text):
+        return text.replace('\\', '\\\\').replace('|', '\\|').replace('<', '&lt;').replace('>', '&gt;')
+    def row(group, values):
+        tables.setdefault(group, []).append('| ' + ' | '.join(cell(value) for value in values) + ' |')
+        lines.append(True)
     for item in items:
         identifier = item['event_id']
         try:
@@ -195,7 +214,9 @@ def render(root, plan, blocked_ids=()):
             continue
         if signal.get('signal_kind') == 'recurrence':
             try:
-                lines.append(recurrence_line(root, item, signal))
+                compact = recurrence_line(root, item, signal, plan).rsplit('（', 1)[0].rstrip('。')
+                name, source = compact.rsplit('：', 1)
+                row('复现', [name, '', '', source + '。'])
             except (ValueError, KeyError, TypeError) as error:
                 missing.append({'event_id': identifier, 'reason': str(error)})
             continue
@@ -208,12 +229,13 @@ def render(root, plan, blocked_ids=()):
             missing.append({'event_id': identifier, 'reason': str(error)})
             continue
         platforms = '、'.join(brief['platforms'])
-        signal = signal['signal_text']
-        lines.append('\n'.join([brief['main_term'],
-            '近义/相关词建议：' + '；'.join(brief['related_terms']),
-            '长尾词建议：' + '；'.join(brief['long_tail_terms']),
-            'SEO建议：' + brief['seo_advice'], '趋势信号：' + signal,
-            '来源平台：' + platforms]))
+        key = item.get('need_id') or item['id']
+        if key in already_today:
+            row('今日已报', [brief['main_term'], '', '', platforms])
+        else:
+            group = '历史跨平台首次纳入' if signal.get('signal_kind') == 'first_cross_platform' else '本轮新词'
+            row(group, [brief['main_term'], '；'.join(brief['related_terms']),
+                        '；'.join(brief['long_tail_terms']), platforms])
     # The caller retains missing briefs as an internal failure, never as a claim
     # that an incomplete run found no opportunities.
     status = {'selected': len(items), 'included':len(lines), 'excluded':excluded, 'missing': missing}
@@ -221,7 +243,10 @@ def render(root, plan, blocked_ids=()):
     if enabled(root, plan):
         status['included_need_ids'] = [item.get('need_id') or item['id'] for item in items
             if item['event_id'] not in excluded and item['event_id'] not in {row['event_id'] for row in missing}]
-    return '\n\n'.join(lines) if lines else EMPTY, status
+    sections = [group + '\n\n| 新词 | 近义词 | 长尾词 | 信息来源 |\n| --- | --- | --- | --- |\n'
+                + '\n'.join(tables[group]) for group in ('本轮新词', '历史跨平台首次纳入', '复现', '今日已报')
+                if group in tables]
+    return '\n\n'.join(sections) if lines else EMPTY, status
 
 
 def main(argv=None):
