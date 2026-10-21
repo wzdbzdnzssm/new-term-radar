@@ -48,7 +48,8 @@ def selected(root, plan, blocked_ids=()):
         for item in box.get('items', []):
             eligibility = item.get('eligibility', {})
             tier = eligibility.get('priority_tier', 3)
-            if not eligibility.get('eligible') or tier not in (1, 2) or item.get('event') not in {'new', 'upgrade'}:
+            allowed_events = {'new', 'upgrade', 'recurrence'} if include_history else {'new', 'upgrade'}
+            if not eligibility.get('eligible') or tier not in (1, 2) or item.get('event') not in allowed_events:
                 continue
             key = item.get('need_id') or item['id']
             if created < start:
@@ -149,6 +150,33 @@ def submit(root, briefs):
     return {'saved': len(operations)}
 
 
+def recurrence_line(root, item, signal):
+    key = item.get('need_id') or item['id']
+    names = [row['main_term'] for row in (load(path, {}) for path in (root / 'keyword-briefs').glob('*.json'))
+             if row.get('need_id') == key and row.get('main_term')]
+    if not names:
+        raise ValueError('Recurrence needs the prior published keyword name')
+    name = public_text(names[0], 'main_term', 140)
+    config = load(root / 'monitor/config.json', {'sources': []})
+    brands = {row['id']: row.get('brand_name') or row['name'] for row in config['sources']}
+    sites = {}
+    for row in item['valid_evidence']:
+        path = (root / row.get('evidence_file', '')).resolve()
+        if not path.is_relative_to(root.resolve()):
+            continue
+        record = load(path, {})
+        if verified(root, record, row.get('content_hash')):
+            brand = brands.get(row.get('source_id'))
+            if brand:
+                sites.setdefault(website(record['url']), public_text(brand, 'platform', 100))
+    new_brand = brands.get(signal['supply_receipt'].get('source_id'))
+    if not new_brand or not sites:
+        raise ValueError('Recurrence needs configured source brands')
+    platforms = sorted(set(sites.values()))
+    return (name + '：本轮又在' + public_text(new_brand, 'platform', 100) + '出现；累计已在'
+            + str(len(platforms)) + '个平台发现（' + '、'.join(platforms) + '）。')
+
+
 def render(root, plan, blocked_ids=()):
     lines, missing, excluded = [], [], []
     items = selected(root, plan, blocked_ids)
@@ -163,6 +191,12 @@ def render(root, plan, blocked_ids=()):
             continue
         if signal['decision'] == 'exclude':
             excluded.append(identifier)
+            continue
+        if signal.get('signal_kind') == 'recurrence':
+            try:
+                lines.append(recurrence_line(root, item, signal))
+            except (ValueError, KeyError, TypeError) as error:
+                missing.append({'event_id': identifier, 'reason': str(error)})
             continue
         raw = load(root / 'keyword-briefs' / (identifier + '.json'), {})
         try:

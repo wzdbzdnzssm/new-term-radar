@@ -24,6 +24,10 @@ only complete deliveries with verified cloud and sent-copy hashes establish prio
 business publication. Internal opportunity ACKs do not mean the word was emailed.
 Historical words are labelled as first business inclusion, without recent-growth
 or first-launch claims. Same-day reruns retain their original report window.
+Previously published words with a real new source/page addition use a compact
+recurrence line. The new appearance is validated against its collection receipt;
+the line names that platform and distinguishes cumulative platform coverage.
+Existing unchanged pages do not alone generate recurrence notifications.
 
 ```bash
 python -m radar.ai_monitor daily --root /path/to/ai-video-monitor

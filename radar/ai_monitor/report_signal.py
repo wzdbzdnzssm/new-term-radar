@@ -100,7 +100,7 @@ def validate(root, plan, item, raw):
     if not quoted(current, raw.get('signal_quote')):
         raise ValueError('Signal needs an exact subject quote')
     kind = raw.get('signal_kind')
-    if current.get('record_type') == 'discovery_name' and kind not in {'new_supply', 'first_cross_platform'}:
+    if current.get('record_type') == 'discovery_name' and kind not in {'new_supply', 'first_cross_platform', 'recurrence'}:
         raise ValueError('Path/catalog names only support an observed supply signal')
     if kind == 'first_cross_platform':
         from .report_history import enabled, published
@@ -110,6 +110,12 @@ def validate(root, plan, item, raw):
                 or (item.get('need_id') or item['id']) in published(root, plan)
                 or at != instant(plan['started_at'])):
             raise ValueError('First cross-platform opportunity requires unreported two-platform evidence in its new workflow')
+    elif kind == 'recurrence':
+        from .report_history import enabled, published
+        if (not enabled(root, plan) or (item.get('need_id') or item['id']) not in published(root, plan)
+                or not raw.get('supply_receipt')):
+            raise ValueError('Recurrence needs prior formal publication and an actual new source appearance')
+        validate_supply(root, item, raw, at)
     elif kind == 'new_supply' and raw.get('supply_receipt'):
         validate_supply(root,item,raw,at)
     elif kind in {'publication', 'new_supply'}:
@@ -223,6 +229,8 @@ def main():
                       'existing_reviews': reviews(args.root, plan)}
             from .report_history import enabled
             if enabled(args.root, plan):
+                from .report_history import published
+                result['previously_reported_need_ids'] = sorted(published(args.root, plan))
                 result['first_cross_platform_signal_at'] = plan['started_at']
                 result['first_cross_platform_notice'] = 'First business inclusion only; never publication time or recent trend growth.'
         elif args.command == 'submit':

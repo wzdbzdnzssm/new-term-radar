@@ -2,7 +2,7 @@
 import argparse
 import json
 import re
-from .eligibility import qualify, POLICY
+from .eligibility import qualify, POLICY, instant
 from .evidence_metadata import verified, history_matches, history_instant
 from .path_evidence import verified as discovery_verified
 from pathlib import Path
@@ -202,6 +202,11 @@ def submit(root, decisions):
             need['source_names'] = sorted(set(need.get('source_names', []) + [observation.get('source_name', observation['source_id'])]))
             count_sources(need); touched.add(need_id)
     events = []
+    reported = set()
+    from .report_history import enabled as business_enabled, published
+    report_context = {'started_at': monitor.utc_now()}
+    if touched and business_enabled(root, report_context):
+        reported = published(root, report_context)
     for key in sorted(touched):
         need = needs[key]
         for observation in pool.values():
@@ -211,6 +216,7 @@ def submit(root, decisions):
         if not need['eligibility']['eligible']: continue
         if need.get('category') != 'video_template' or need.get('migration_pending'): continue
         event = None
+        marker = None
         if 'new' not in keys and not need.get('reported_at'): event = 'new'
         elif before.get(key, 0) < 2 <= count:
             if (need.get('reported_at') or 'new' in need.get('featured_event_types', [])) and 'upgrade' not in keys:
@@ -219,10 +225,26 @@ def submit(root, decisions):
                 # An archived single-source item was never featured. Its new evidence
                 # earns a fresh ranking opportunity, not a claim of a delivered upgrade.
                 event = 'new'; keys.append('new:multisource')
+        if event is None and key in reported:
+            current = instant(monitor.utc_now())
+            additions = []
+            for identifier in consumed:
+                observation = pool[identifier]
+                first = observation.get('first_seen')
+                seen_at = observation.get('observed_at')
+                if (observation.get('need_id') == key and observation.get('review_status') == 'accept'
+                        and observation.get('is_first_seen') and first and seen_at
+                        and instant(first) == instant(seen_at)
+                        and 0 <= (current - instant(first)).total_seconds() <= 48 * 3600):
+                    additions.append({'source': observation['source_id'], 'urls': sorted(observation['evidence_urls']),
+                                      'observed_at': seen_at})
+            if additions:
+                marker = 'recurrence:' + digest(sorted(additions, key=lambda row: (row['source'], row['urls'])))
+                if marker not in keys:
+                    event = 'recurrence'
         if event:
-            keys.append(event); need['announced_source_count'] = max(count, need.get('announced_source_count', 0))
-            events.append({'event_id': digest(key + ':' + event + ':' + str(count)), 'event': event, **need})
-    from .eligibility import instant
+            keys.append(marker or event); need['announced_source_count'] = max(count, need.get('announced_source_count', 0))
+            events.append({**need, 'event_id': digest(key + ':' + (marker or event) + ':' + str(count)), 'event': event})
     events.sort(key=lambda n: (n['eligibility']['priority_tier'], -instant(n['eligibility']['earliest_known_published_at']).timestamp() if n['eligibility']['fresh_48h'] else 0, -n['source_count'], n.get('priority', 2), n['id']))
     for event in events:
         need = needs[event['id']]

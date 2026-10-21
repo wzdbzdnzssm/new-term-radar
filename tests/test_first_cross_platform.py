@@ -3,6 +3,7 @@ import copy
 import pytest
 
 from radar.ai_monitor import keyword_brief, path_evidence, report_history, report_signal
+from radar.ai_monitor import review_queue
 from radar.ai_monitor.eligibility import qualify
 from radar.ai_monitor.queue_store import digest, monitor, write
 
@@ -85,6 +86,51 @@ def test_same_day_freeze_readback_and_rerun_stay_reproducible(opportunity):
     text, before = keyword_brief.render(root, plan)
     delivery(root, text, '2026-10-22T00:10:00Z')
     assert keyword_brief.render(root, plan) == (text, before)
+
+
+def test_reported_word_new_third_source_emits_only_one_compact_recurrence(opportunity):
+    root, original, brief, plan, signal = opportunity
+    delivery(root, 'Hotel Lobby AI\n近义/相关词建议：hotel lobby', '2026-10-21T06:14:00Z')
+    config = review_queue.load(root / 'monitor/config.json', {})
+    config['sources'].append({'id': 'third', 'name': 'Third'})
+    write(root / 'monitor/config.json', config)
+    need = dict(original, source_count=2, event_keys=['new'], source_names=['First', 'Second'])
+    write(root / 'opportunity-registry.json', {'opportunities': [need], 'observation_pool': []})
+    url = 'https://third.com/hotel-lobby-ai'
+    value = path_evidence.create(root, url, source_id='third', supply_at=plan['started_at'])
+    observation = {'observation_id': digest('third\n/hotel-lobby-ai'), 'source_id': 'third',
+        'source_name': 'Third', 'canonical_path': '/hotel-lobby-ai', 'evidence_urls': [url],
+        'aliases': [url], 'first_seen': plan['started_at'], 'observed_at': plan['started_at'], 'is_first_seen': True}
+    write(root / 'pending-observations.json', {'observations': [observation]})
+    ref = {key: value[key] for key in ('url', 'evidence_file', 'content_hash')}
+    decision = {'observation_id': observation['observation_id'], 'action': 'accept',
+        'category': 'video_template', 'need_id': need['id'], 'need': 'Hotel Lobby AI', 'evidence': [ref]}
+    outcome = review_queue.submit(root, [decision])
+    box = review_queue.load(root / 'outbox' / (outcome['outbox_id'] + '.json'), {})
+    item = box['items'][0]
+    assert item['event'] == 'recurrence'
+    assert review_queue.submit(root, [decision])['events'] == 0
+    receipt_path = 'batch-runs/2026-10-22-run/sources/third/0001-receipt.json'
+    receipt = {'source_id': 'third', 'status': 'committed', 'result': {'status': 'ok',
+        'baseline_created': False, 'scope_reset': False, 'observed_at': plan['started_at'],
+        'added': [{'url': url, 'first_seen': plan['started_at']}]}}
+    write(root / receipt_path, receipt)
+    signal.update(event_id=item['event_id'], item_hash=digest(item), signal_kind='recurrence',
+        signal_quote=value['summary'], evidence_refs=[ref],
+        supply_receipt={'path': receipt_path, 'sha256': digest(receipt), 'source_id': 'third', 'url': url})
+    report_signal.submit(root, plan, [signal])
+    text, status = keyword_brief.render(root, plan)
+    assert status['included'] == 1 and status['missing'] == []
+    assert text == 'Hotel Lobby AI：本轮又在Third出现；累计已在3个平台发现（First、Second、Third）。'
+    assert not (root / ('keyword-briefs/' + item['event_id'] + '.json')).exists()
+
+
+def test_unchanged_old_word_cannot_be_called_a_recurrence_without_new_supply(opportunity):
+    root, item, brief, plan, signal = opportunity
+    delivery(root, 'Hotel Lobby AI\n近义/相关词建议：hotel lobby', '2026-10-21T06:14:00Z')
+    signal['signal_kind'] = 'recurrence'
+    with pytest.raises(ValueError, match='actual new source'):
+        report_signal.validate(root, plan, item, signal)
 
 
 @pytest.mark.parametrize('fault', ['single_platform', 'old_workflow', 'wrong_time'])
