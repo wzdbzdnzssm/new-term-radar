@@ -69,13 +69,14 @@ def create(root, execution_id, full_pending=False, report_window_start=None):
 
 def progress(root, plan):
     pending = load(root / 'pending-observations.json', {'observations': []})['observations']
+    pending_ids = {row['observation_id'] for row in pending}
     pool = {r['observation_id']: r for r in load(root / 'opportunity-registry.json',
             {'observation_pool': []})['observation_pool']}
     rows = []
     for item in plan['items']:
         reviewed = pool.get(item['observation_id'], {})
         # blocked lacks reviewed_at: its reason is diagnostic, never completed review.
-        complete = bool(reviewed.get('review_status') in {'accept', 'watch', 'exclude'} and (
+        complete = bool(item['observation_id'] not in pending_ids and reviewed.get('review_status') in {'accept', 'watch', 'exclude'} and (
             reviewed.get('reviewed_at') and instant(reviewed['reviewed_at']) >= instant(plan['started_at'])))
         rows.append({**item, 'completed': complete,
             'action': reviewed.get('review_status') if complete else 'unreviewed',

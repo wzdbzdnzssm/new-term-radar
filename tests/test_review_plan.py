@@ -110,3 +110,13 @@ def test_bind_uses_actual_collector_snapshots_even_if_latest_already_changed(tmp
     result=plan.bind_collection(tmp_path,'full',0,snapshots=snapshots)
     assert result['collection_run_id']=='this-execution'
     assert result['supplemental_scans']['latest-template-scan.json']['tier']=='weekly'
+
+
+def test_same_observation_rediscovered_after_review_reopens_current_plan(tmp_path):
+    save(tmp_path/'opportunity-registry.json',{'observation_pool':[
+        {'observation_id':'a','review_status':'watch','reviewed_at':'2026-10-21T03:00:00Z'}]})
+    current={'execution_id':'full','started_at':'2026-10-21T02:00:00Z','items':[{'observation_id':'a'}]}
+    save(tmp_path/'pending-observations.json',{'observations':[]})
+    assert plan.progress(tmp_path,current)['remaining']==0
+    save(tmp_path/'pending-observations.json',{'observations':[{'observation_id':'a','source_id':'higgsfield-ai'}]})
+    assert plan.progress(tmp_path,current)['remaining']==1
