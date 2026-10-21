@@ -6,7 +6,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .eligibility import instant, publication_dates
-from .evidence_metadata import verified
+from .path_evidence import verified
 from .queue_store import load, locked, commit, op, digest, monitor
 
 
@@ -26,7 +26,7 @@ def record(root, ref, allowed=None):
     if not path.is_relative_to(root.resolve()):
         raise ValueError('Signal evidence outside root')
     value = load(path, {})
-    if not verified(value, key[1]):
+    if not verified(root, value, key[1]):
         raise ValueError('Signal evidence is not hash verified')
     return value
 
@@ -100,7 +100,17 @@ def validate(root, plan, item, raw):
     if not quoted(current, raw.get('signal_quote')):
         raise ValueError('Signal needs an exact subject quote')
     kind = raw.get('signal_kind')
-    if kind == 'new_supply' and raw.get('supply_receipt'):
+    if current.get('record_type') == 'discovery_name' and kind not in {'new_supply', 'first_cross_platform'}:
+        raise ValueError('Path/catalog names only support an observed supply signal')
+    if kind == 'first_cross_platform':
+        from .report_history import enabled, published
+        from .eligibility import website
+        sites = {website(value['url']) for value in records}
+        if (not enabled(root, plan) or item['eligibility']['priority_tier'] != 2 or len(sites) < 2
+                or (item.get('need_id') or item['id']) in published(root, plan)
+                or at != instant(plan['started_at'])):
+            raise ValueError('First cross-platform opportunity requires unreported two-platform evidence in its new workflow')
+    elif kind == 'new_supply' and raw.get('supply_receipt'):
         validate_supply(root,item,raw,at)
     elif kind in {'publication', 'new_supply'}:
         dates = [instant(row['published_at']) for row in publication_dates(current) if not row.get('veto_only')]
@@ -211,6 +221,10 @@ def main():
                               for e in row.get('evidence',[])]}
                           for row in pool if row.get('need_id') in keys],
                       'existing_reviews': reviews(args.root, plan)}
+            from .report_history import enabled
+            if enabled(args.root, plan):
+                result['first_cross_platform_signal_at'] = plan['started_at']
+                result['first_cross_platform_notice'] = 'First business inclusion only; never publication time or recent trend growth.'
         elif args.command == 'submit':
             result = submit(args.root, plan, load(args.input, []))
         else:

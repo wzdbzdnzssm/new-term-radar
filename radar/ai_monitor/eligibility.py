@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 from urllib.parse import urldefrag, urljoin
 from .queue_store import digest, domain, load
 from .evidence_metadata import metadata_valid, verified, history_matches, DATE_TOKEN, history_instant
+from .path_evidence import verified as discovery_verified
 
 POLICY = 'fresh48h-hot-priority-v2'
 
@@ -109,7 +110,7 @@ def qualify(root, need, now):
         path = (root / relative).resolve()
         if not path.is_relative_to(root.resolve()): continue
         record = load(path, {})
-        if not row.get('content_hash') or not verified(record, row['content_hash']): continue
+        if not row.get('content_hash') or not discovery_verified(root, record, row['content_hash']): continue
         identity = {'site:' + website(url) for url in [record.get('url', row['url']), record.get('final_url'), record.get('html_canonical')] if url}
         if row.get('source_id'): identity.add('source:' + row['source_id'])
         joined = [group for group in sites if group & identity]
@@ -160,5 +161,18 @@ def qualify(root, need, now):
     if any(date > current for date in dates): reasons.append('future_publication_date')
     fresh = bool(confirmed) and min(dates) >= cutoff and max(dates) <= current and not known_old
     tier = 1 if fresh else (2 if len(sites) >= 2 else 3)
+    supply_dates = []
+    for row in need.get('valid_evidence', []):
+        path = (root / row.get('evidence_file', '')).resolve()
+        if not path.is_relative_to(root.resolve()): continue
+        record = load(path, {})
+        if (record.get('record_type') == 'discovery_name' and record.get('supply_added_at')
+                and discovery_verified(root, record, row.get('content_hash'))):
+            at = instant(record['supply_added_at'])
+            if cutoff <= at <= current: supply_dates.append(at)
+    # This ranks an observed source addition; it never asserts the AI need's birth.
+    if supply_dates:
+        tier = 1
+        reasons.append('observed_new_supply_not_demand_birth')
     blocked = need.get('category') != 'video_template' or need.get('migration_pending') or not sites
-    return {'policy_version': POLICY, 'eligible': not bool(blocked), 'priority_tier': tier, 'fresh_48h': fresh, 'hot': len(sites) >= 2, 'reasons': reasons, 'source_count': len(sites), 'earliest_known_published_at': min(dates).isoformat() if dates else None, 'publication_evidence': evidence, 'historical_demand_evidence': historical, 'evaluated_at': now}
+    return {'policy_version': POLICY, 'eligible': not bool(blocked), 'priority_tier': tier, 'fresh_48h': fresh, 'observed_new_supply': bool(supply_dates), 'hot': len(sites) >= 2, 'reasons': reasons, 'source_count': len(sites), 'earliest_known_published_at': min(dates).isoformat() if dates else None, 'publication_evidence': evidence, 'historical_demand_evidence': historical, 'evaluated_at': now}

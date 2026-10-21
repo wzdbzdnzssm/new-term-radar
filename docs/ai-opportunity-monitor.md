@@ -6,6 +6,25 @@ Hermes schedules commands and retains the existing verified delivery workflow.
 No CLI command here sends messages, starts paid generation, or deploys websites.
 Financial, server/API health and Sub2API catalog monitors are outside this module.
 
+An optional `review_workflow.path_first_from` date in `monitor/config.json` enables
+URL-first discovery from that Shanghai calendar day. Readable final path segments
+provide names directly; opaque IDs fall back to detail-page reads, unless an already
+collected named template card identifies them. These compact `discovery_name`
+records explicitly do not verify HTML, current detail availability or publication.
+Existing baseline-addition receipts still bind observed new supply; initial
+inventory, restoration and locale aliases do not become new demand. A source
+addition can rank for review without claiming that the AI demand was born recently.
+Hermes confirms candidate name groups and writes one keyword brief per stable need.
+Evidence history is indexed once per submit batch, retaining earlier evidence.
+Without the date setting, the existing page-based workflow remains in effect.
+`review_workflow.include_first_cross_platform` also admits previously unreported
+cross-platform opportunities without requiring a new publication in this window.
+Set `delivery_receipts_dir` to the existing daily delivery receipts directory;
+only complete deliveries with verified cloud and sent-copy hashes establish prior
+business publication. Internal opportunity ACKs do not mean the word was emailed.
+Historical words are labelled as first business inclusion, without recent-growth
+or first-launch claims. Same-day reruns retain their original report window.
+
 ```bash
 python -m radar.ai_monitor daily --root /path/to/ai-video-monitor
 python -m radar.ai_monitor core --root /path/to/ai-video-monitor

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .eligibility import instant, website
-from .evidence_metadata import verified
+from .path_evidence import verified
 from .queue_store import load, locked, commit, op, digest, monitor
 from .runtime import DEFAULT_ROOT
 
@@ -35,9 +35,15 @@ def selected(root, plan, blocked_ids=()):
     start, _ = report_window(plan['started_at'])
     start = instant(plan.get('report_window_start', start))
     end = instant(plan.get('report_window_end', datetime.now(timezone.utc).isoformat()))
+    from .report_history import enabled, published
+    include_history = enabled(root, plan)
+    reported = published(root, plan) if include_history else set()
+    current_needs = {row['id']: row for row in load(root / 'opportunity-registry.json', {}).get('opportunities', [])}
+    qualified = {}
     for path in sorted((root / 'outbox').glob('*.json')):
         box = load(path, {})
-        if box.get('outbox_id') in blocked_ids or not start <= instant(box.get('created_at')) < end:
+        created = instant(box.get('created_at'))
+        if box.get('outbox_id') in blocked_ids or created >= end or (created < start and not include_history):
             continue
         for item in box.get('items', []):
             eligibility = item.get('eligibility', {})
@@ -45,6 +51,14 @@ def selected(root, plan, blocked_ids=()):
             if not eligibility.get('eligible') or tier not in (1, 2) or item.get('event') not in {'new', 'upgrade'}:
                 continue
             key = item.get('need_id') or item['id']
+            if created < start:
+                if key in reported or tier != 2 or key not in current_needs:
+                    continue
+                if key not in qualified:
+                    from .eligibility import qualify
+                    qualified[key] = qualify(root, current_needs[key], plan['started_at'])
+                if not qualified[key]['eligible'] or qualified[key]['source_count'] < 2:
+                    continue
             candidate = (tier, -instant(box['created_at']).timestamp(), item['event_id'])
             if key not in needs or candidate < needs[key][0]:
                 needs[key] = (candidate, item)
@@ -90,7 +104,7 @@ def validate(root, item, raw):
         if not path.is_relative_to(root.resolve()):
             raise ValueError('Brief evidence outside root')
         record = load(path, {})
-        if not verified(record, key[1]):
+        if not verified(root, record, key[1]):
             raise ValueError('Brief evidence is no longer verified')
         if isinstance(quote, str) and quote and main.casefold() in quote.casefold() and (
                 quote in record.get('title', '') or quote in record.get('text', '')):
@@ -104,7 +118,7 @@ def validate(root, item, raw):
     if not named:
         raise ValueError('Main term needs a verbatim name quote from reviewed evidence')
     eligibility = item['eligibility']
-    if eligibility['priority_tier'] == 1 and not eligibility.get('fresh_48h'):
+    if eligibility['priority_tier'] == 1 and not (eligibility.get('fresh_48h') or eligibility.get('observed_new_supply')):
         raise ValueError('New-launch signal requires verified fresh publication')
     if eligibility['priority_tier'] == 2 and len(sites) < 2:
         raise ValueError('Cross-platform signal needs evidence from two real websites')
@@ -167,8 +181,12 @@ def render(root, plan, blocked_ids=()):
             '来源平台：' + platforms]))
     # The caller retains missing briefs as an internal failure, never as a claim
     # that an incomplete run found no opportunities.
-    return '\n\n'.join(lines) if lines else EMPTY, {'selected': len(items), 'included':len(lines),
-                                                   'excluded':excluded, 'missing': missing}
+    status = {'selected': len(items), 'included':len(lines), 'excluded':excluded, 'missing': missing}
+    from .report_history import enabled
+    if enabled(root, plan):
+        status['included_need_ids'] = [item.get('need_id') or item['id'] for item in items
+            if item['event_id'] not in excluded and item['event_id'] not in {row['event_id'] for row in missing}]
+    return '\n\n'.join(lines) if lines else EMPTY, status
 
 
 def main(argv=None):

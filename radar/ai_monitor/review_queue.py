@@ -4,6 +4,7 @@ import json
 import re
 from .eligibility import qualify, POLICY
 from .evidence_metadata import verified, history_matches, history_instant
+from .path_evidence import verified as discovery_verified
 from pathlib import Path
 from .queue_store import monitor, load, write, locked, recover, commit, op, digest, domain, merge_observations, earliest_time
 from .runtime import DEFAULT_ROOT
@@ -20,14 +21,28 @@ def resolved(root, relative):
     if not path.is_relative_to(root.resolve()): raise ValueError('Evidence path outside root')
     return path
 
-def validate_evidence(root, observation, submitted):
+def evidence_index(root, urls):
+    index = {url: [] for url in urls}
+    for path in (root / 'page-evidence').glob('*.json'):
+        record = load(path, {})
+        if not isinstance(record, dict):
+            if path.name == 'index.json': continue
+            raise ValueError('Evidence record must be an object: ' + str(path))
+        if record.get('url') in index:
+            index[record['url']].append((path, record))
+    return index
+
+
+def validate_evidence(root, observation, submitted, indexed=None):
     allowed = set(observation.get('evidence_urls', []) + observation.get('aliases', []))
     rows = []
     for item in submitted:
         record = load(resolved(root, item['evidence_file']), {})
         expected = record.get('content_hash', digest(record.get('text', '')))
-        if not verified(record):
+        if not discovery_verified(root, record):
             raise ValueError('Evidence file is not successful verified page metadata')
+        if record.get('record_type') == 'discovery_name' and record.get('source_id') != observation['source_id']:
+            raise ValueError('Discovery name belongs to another source')
         if item.get('content_hash') != expected:
             raise ValueError('Evidence content_hash mismatch')
         links = {record.get('url'), record.get('final_url'), record.get('html_canonical')}
@@ -38,15 +53,16 @@ def validate_evidence(root, observation, submitted):
     # Preserve all fetched versions/supporting URLs, so selecting only a newer
     # page cannot hide an older publication for this same observation.
     covered = {(row['evidence_file'], row['content_hash']) for row in rows}
-    for path in (root / 'page-evidence').glob('*.json'):
-        record = load(path, {})
+    history = ((path, load(path, {})) for path in (root / 'page-evidence').glob('*.json')) if indexed is None else (
+        entry for url in allowed for entry in indexed.get(url, []))
+    for path, record in history:
         # Legacy indexes are metadata arrays, not individual evidence records.
         if not isinstance(record, dict):
             if path.name == 'index.json': continue
             raise ValueError('Evidence record must be an object: ' + str(path))
         relative = path.relative_to(root).as_posix()
         body_hash = record.get('content_hash', digest(record.get('text', '')))
-        if record.get('url') not in allowed or not verified(record): continue
+        if record.get('url') not in allowed or not discovery_verified(root, record): continue
         if (relative, body_hash) in covered: continue
         rows.append({'url': record['url'], 'source_id': observation['source_id'], 'domain': domain(record['url']), 'evidence_file': relative, 'content_hash': body_hash})
     return rows
@@ -130,6 +146,13 @@ def submit(root, decisions):
     available = dict(pool)
     for observation in pending['observations']:
         key = observation['observation_id']; available[key] = {**available.get(key, {}), **observation}
+    from .path_evidence import policy
+    indexed = None
+    if policy(root):
+        urls = {url for decision in decisions if decision.get('action') != 'blocked'
+                for row in [available.get(decision.get('observation_id'), {})]
+                for url in row.get('evidence_urls', []) + row.get('aliases', [])}
+        indexed = evidence_index(root, urls)
     needs = {n['id']: n for n in reg['opportunities']}
     before = {key: n.get('source_count', 0) for key, n in needs.items()}
     consumed, touched = set(), set()
@@ -154,7 +177,7 @@ def submit(root, decisions):
         if category not in CATEGORIES: raise ValueError('A concrete category is required')
         if (observation.get('classification') == 'migration' or observation.get('migrated_from')) and category == 'video_template':
             raise ValueError('A URL migration cannot be promoted as a new video template; retain migration classification')
-        evidence = validate_evidence(root, observation, decision.get('evidence', []))
+        evidence = validate_evidence(root, observation, decision.get('evidence', []), indexed)
         need_id = decision.get('need_id')
         if not need_id or not re.fullmatch(r'[a-zA-Z0-9_-]+', need_id): raise ValueError('Stable need_id required')
         if observation.get('need_id') and observation['need_id'] != need_id: raise ValueError('Existing observation need_id cannot be silently changed')
@@ -230,6 +253,8 @@ def render(items, errors):
         if index == 3: lines.append('其余候选（按同一优先级排序）：')
         eligibility = item.get('eligibility', {})
         label = {1: '近48小时新需求', 2: '跨站热需求', 3: '非新非热观察'}.get(eligibility.get('priority_tier'), '观察')
+        if eligibility.get('observed_new_supply') and not eligibility.get('fresh_48h'):
+            label = '新增页面或模板条目'
         keywords = item.get('keywords', [])
         if isinstance(keywords, list): keywords = '；'.join(keywords)
         external = item.get('external_coverage', [])

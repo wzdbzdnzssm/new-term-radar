@@ -54,6 +54,10 @@ def read_page(url, opener=None):
     return record
 
 def fetch(url, root=ROOT, opener=None):
+    from .path_evidence import create
+    named = create(root, url)
+    if named:
+        return named
     record = read_page(url, opener)
     relative = 'page-evidence/' + digest(record) + '.json'
     record['evidence_file'] = relative

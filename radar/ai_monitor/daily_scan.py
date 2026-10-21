@@ -23,7 +23,7 @@ def review_lane(source, evidence, migrated):
     if re.search(r'\b(image|photo|picture)\b', title) and not re.search(r'\b(video|dance|animation|motion)\b', title): return 'static_image'
     return 'secondary' if source['id'] == 'magichour-ai' else 'video_candidate'
 
-def collect(source, options, previous, fetcher=monitor.fetch_bytes, evidence_fetcher=None):
+def collect(source, options, previous, fetcher=monitor.fetch_bytes, evidence_fetcher=None, name_fetcher=None):
     current, maps = monitor.crawl(source, options, fetcher)
     next_state, result = monitor.reconcile(source, previous, current, monitor.utc_now())
     result['checked_maps'] = maps
@@ -36,7 +36,7 @@ def collect(source, options, previous, fetcher=monitor.fetch_bytes, evidence_fet
         if key not in history: groups.setdefault(key, []).append(entry)
     removed = [row['url'] for row in result['removed']]
     observations = []
-    old_evidence = {url: evidence_reference(evidence_fetcher(url)) for url in removed} if groups and evidence_fetcher else {}
+    old_evidence = {url: evidence_reference(evidence_fetcher(url)) for url in removed} if groups and evidence_fetcher and not name_fetcher else {}
     # A removed page is evidence for a new entity only when its redirect or
     # canonical actually identifies that entity. Attaching the entire removed
     # library to every group is quadratic and contaminates unrelated reviews.
@@ -52,7 +52,8 @@ def collect(source, options, previous, fetcher=monitor.fetch_bytes, evidence_fet
                 migrated.append(old)
         first = earliest_time(*(row['first_seen'] for row in rows))
         for url in urls:
-            record = evidence_reference(evidence_fetcher(url)) if evidence_fetcher else {'url': url, 'valid': False, 'error': 'Evidence not fetched'}
+            named = name_fetcher(url, result) if name_fetcher else None
+            record = evidence_reference(named) if named else (evidence_reference(evidence_fetcher(url)) if evidence_fetcher else {'url': url, 'valid': False, 'error': 'Evidence not fetched'})
             evidence.append(record)
             if not record.get('valid'): failures.append({'url': url, 'error': record.get('error', 'Invalid new page')})
             else:
@@ -79,7 +80,9 @@ def run(root, selected=None, fetcher=monitor.fetch_bytes, evidence_fetcher=None,
         for source in sources:
             state_path = 'monitor/state/' + source['id'] + '.json'; previous = load(root / state_path, None)
             try:
-                state, result, incoming = collect(source, config.get('fetch', {}), previous, fetcher, evidence_fetcher or (lambda u: review_pages.fetch(u, root)))
+                from .path_evidence import policy, collector
+                name_fetcher = (lambda url, result: collector(root, source, url, result)) if policy(root) else None
+                state, result, incoming = collect(source, config.get('fetch', {}), previous, fetcher, evidence_fetcher or (lambda u: review_pages.fetch(u, root)), name_fetcher)
             except Exception as error:
                 result = {'id': source['id'], 'status': getattr(error, 'status', 'error'), 'error': str(error) or type(error.__cause__ or error).__name__, 'error_type': type(error.__cause__ or error).__name__, 'added': [], 'changed': [], 'removed': [], 'baseline': [], 'checked_maps': getattr(error, 'checked_maps', [])}
                 errors.append({'source_id': source['id'], 'error': str(error)}); results.append(result); continue

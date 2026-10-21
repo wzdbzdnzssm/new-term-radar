@@ -221,7 +221,10 @@ def run(root, tier='core', fetcher=monitor.fetch_bytes, page_reader=review_pages
                 changed = [] if old is None else [url for url in current if url not in old['urls'] or old['urls'][url] != current[url]]
                 errors = []
                 for url in changed:
-                    record = page_reader(url)
+                    from .path_evidence import create as discovery_name
+                    is_new = url not in old['urls'] and identity(url) not in known_entities
+                    record = discovery_name(root, url, source_id='higgsfield-ai', observed_at=timestamp,
+                                            supply_at=timestamp if is_new else None) or page_reader(url)
                     if not record.get('valid'):
                         errors.append({'url': url, 'error': record.get('error', 'page unread')})
                         continue

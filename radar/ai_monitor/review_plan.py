@@ -63,6 +63,13 @@ def create(root, execution_id, full_pending=False, report_window_start=None):
             'selection': ('all pending, recent then source-fair backlog; discovery is not demand age' if full_pending
                 else 'all discoveries within 48h, then source-fair backlog; discovery is not demand age'),
             'items': selected}
+    from .path_evidence import policy
+    effective = policy(root, plan['started_at'])
+    if effective:
+        plan.update(review_workflow='path_first', path_first_from=effective)
+        from .report_history import enabled, published
+        if enabled(root, plan):
+            plan['previously_reported_need_ids'] = sorted(published(root, plan))
     commit(root, 'review-plan', [op(path, plan), op('review-plan-history.json', history)])
     return plan
 
@@ -82,12 +89,19 @@ def progress(root, plan):
             'action': reviewed.get('review_status') if complete else 'unreviewed',
             'blocked_reason': plan.get('deferred', {}).get(item['observation_id'],
                 reviewed.get('blocked_reason', ''))})
-    return {'execution_id': plan['execution_id'], 'planned': len(rows),
-            'report_signal_review': ('Before final completion read persistent Skill report-signal section; '
+    notice = ('Before final completion read persistent Skill report-signal section; '
                 'run radar.ai_monitor.report_signal candidates, then independently review each event and '
                 'submit/verify. Old backlog first review, outbox/checked_at timestamps and navigation/hash '
                 'changes do not prove a new trend. Explicitly exclude historical stock without a real '
-                'window signal; keep reviewing all ready batches. No manual finish or mail.'),
+                'window signal; keep reviewing all ready batches. No manual finish or mail.')
+    from .path_evidence import policy
+    if policy(root, plan['started_at']):
+        notice = ('Path-first: identify readable URL names without detail HTML; fetch only unidentified IDs. '
+                  'Use observed new-supply receipts, and when enabled include first unreported two-platform '
+                  'opportunities via first_cross_platform. First business inclusion never means recent '
+                  'publication or growth. Submit/verify all candidates; no manual finish or mail.')
+    return {'execution_id': plan['execution_id'], 'planned': len(rows),
+            'report_signal_review': notice,
             'recent_planned': plan.get('recent_discovery_count', 0),
             'completed': sum(r['completed'] for r in rows),
             'remaining': sum(not r['completed'] for r in rows), 'items': rows,
@@ -174,6 +188,10 @@ def main():
                 'ready_to_review': len(unfinished),
                 'collection_notice': plan.get('collection_recovery'),
                 'items': unfinished[args.offset:args.offset+args.limit]}
+            from .path_evidence import policy, groups
+            if policy(args.root, plan['started_at']):
+                result['workflow'] = 'path_first'
+                result['candidate_groups'] = groups(result['items'])
         else:
             result = plan if args.command == 'create' else progress(args.root, plan)
         print(json.dumps(result, ensure_ascii=False))
