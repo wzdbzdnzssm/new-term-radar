@@ -234,9 +234,13 @@ def run(root, tier='core', fetcher=monitor.fetch_bytes, page_reader=review_pages
                         # the same human review queue without pretending to be a
                         # named video template or an independently confirmed need.
                         path = canonical_path(url, {'id': 'higgsfield-ai'})
-                        relative = 'page-evidence/' + digest(record) + '.json'
-                        record['evidence_file'] = relative
-                        metadata = compact(record)
+                        if record.get('storage_version'):
+                            metadata = compact(record)
+                            relative = metadata['evidence_file']
+                        else:
+                            relative = 'page-evidence/' + digest(record) + '.json'
+                            record['evidence_file'] = relative
+                            metadata = compact(record)
                         from .queue_store import write, evidence_reference
                         write(root / relative, metadata)
                         incoming.append({'observation_id': observation_id('higgsfield-ai', path),
@@ -294,9 +298,13 @@ def run(root, tier='core', fetcher=monitor.fetch_bytes, page_reader=review_pages
                                    page_changed=bool(old and old.get('page_fingerprint') != fingerprint), baseline_created=old is None)
                         if row['page_changed']:
                             from .queue_store import write, evidence_reference
-                            relative = 'page-evidence/' + digest(record) + '.json'
-                            record['evidence_file'] = relative
-                            metadata = compact(record)
+                            if record.get('storage_version'):
+                                metadata = compact(record)
+                                relative = metadata['evidence_file']
+                            else:
+                                relative = 'page-evidence/' + digest(record) + '.json'
+                                record['evidence_file'] = relative
+                                metadata = compact(record)
                             write(root / relative, metadata)
                             path = canonical_path(row['url'], {'id': 'higgsfield-ai'})
                             incoming.append({'observation_id': observation_id('higgsfield-ai', path),

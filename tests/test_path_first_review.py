@@ -2,7 +2,7 @@ import copy
 import pytest
 
 from radar.ai_monitor import daily_scan, path_evidence, review_pages, review_queue, templates
-from radar.ai_monitor.evidence_metadata import verified as page_verified
+from radar.ai_monitor.evidence_metadata import compact, metadata_valid, verified as page_verified
 from radar.ai_monitor.keyword_brief import validate as validate_brief
 from radar.ai_monitor.queue_store import digest, load, monitor, write
 from radar.ai_monitor.report_signal import validate as validate_signal
@@ -148,3 +148,47 @@ def test_higgs_readable_detail_skips_html(enabled, monkeypatch):
     assert templates.run(enabled, fetcher=xml, page_reader=no_page) == 0
     pool = load(enabled / 'video-template-candidates.json', {})
     assert any(row['name'] == 'hotel lobby ai' for row in pool['entities'].values())
+
+
+def test_higgs_supplemental_path_evidence_keeps_compact_integrity(enabled, monkeypatch):
+    monkeypatch.setattr(templates, 'MAPS', {'core': ['blog/sitemap.xml'], 'daily': [], 'weekly': []})
+    monkeypatch.setattr(templates, 'AGGREGATES', [])
+    urls = ['https://higgsfield.ai/blog/old-release']
+
+    def xml(link, options):
+        return ('<urlset>' + ''.join('<url><loc>' + url + '</loc></url>' for url in urls) + '</urlset>').encode()
+
+    no_page = lambda *a: pytest.fail('Readable supplemental paths must not fetch HTML')
+    assert templates.run(enabled, fetcher=xml, page_reader=no_page) == 0
+    urls.append('https://higgsfield.ai/blog/new-release')
+    assert templates.run(enabled, fetcher=xml, page_reader=no_page) == 0
+    report = load(enabled / 'latest-template-scan.json', {})
+    assert report['feeds'][0]['status'] == 'ok'
+    observation = load(enabled / 'pending-observations.json', {})['observations'][0]
+    metadata = load(enabled / observation['evidence'][0]['evidence_file'], {})
+    assert metadata_valid(metadata)
+    assert metadata['evidence_file'] == observation['evidence'][0]['evidence_file']
+    tampered = copy.deepcopy(metadata)
+    tampered['evidence_file'] = 'page-evidence/tampered.json'
+    with pytest.raises(ValueError, match='integrity mismatch'):
+        compact(tampered)
+
+
+def test_higgs_changed_supplemental_aggregate_reuses_signed_evidence(enabled, monkeypatch):
+    monkeypatch.setattr(templates, 'MAPS', {'core': [], 'daily': [], 'weekly': []})
+    monkeypatch.setattr(templates, 'AGGREGATES', ['/genjutsu'])
+    revision = ['Initial capability']
+
+    def page(url):
+        text = revision[0]
+        relative = 'page-evidence/' + digest(text) + '.json'
+        return compact({'url': url, 'evidence_file': relative, 'valid': True, 'http_status': 200,
+                        'title': text, 'summary': text, 'text': text, 'content_hash': digest(text)})
+
+    assert templates.run(enabled, page_reader=page) == 0
+    revision[0] = 'Updated capability'
+    assert templates.run(enabled, page_reader=page) == 0
+    observation = load(enabled / 'pending-observations.json', {})['observations'][0]
+    metadata = load(enabled / observation['evidence'][0]['evidence_file'], {})
+    assert metadata_valid(metadata)
+    assert metadata['title'] == revision[0]
