@@ -142,11 +142,27 @@ def run_locked(root, page_reader):
         row = {'url': url}
         report['pages'].append(row)
         try:
-            record = page_reader(url)
-            if not record.get('valid'):
-                raise ValueError(record.get('error', 'Page unavailable'))
-            cards = parse_cards(record.get('raw_html', ''))
+            failures = []
+            for attempt in range(2):
+                try:
+                    record = page_reader(url)
+                    if not record.get('valid'):
+                        raise ValueError(record.get('error') or
+                            'Page unavailable (HTTP ' + str(record.get('http_status', 'unknown')) +
+                            ', visible characters ' + str(len(record.get('text', ''))) + ')')
+                    cards = parse_cards(record.get('raw_html', ''))
+                    break
+                except MemoryError:
+                    raise
+                except Exception as error:
+                    failures.append(type(error).__name__ + ': ' + str(error))
+                    if attempt:
+                        raise
+            row['read_attempts'] = attempt + 1
+            if failures:
+                row['read_errors'] = failures
         except Exception as error:
+            row.update(read_attempts=len(failures), read_errors=failures)
             row.update(status='unread', error=type(error).__name__ + ': ' + str(error))
             continue
         previous = state['pages'].get(url)
