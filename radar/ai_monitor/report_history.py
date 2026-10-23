@@ -1,4 +1,4 @@
-"""Business publication history comes from complete, verified daily deliveries."""
+"""Business publication history comes from verified, publishable daily deliveries."""
 import re
 from datetime import date
 from pathlib import Path
@@ -69,7 +69,8 @@ def published(root, plan, same_day=False):
         record = load(path, {})
         text = record.get('text', '')
         base, mail = record.get('base_receipt', {}), record.get('mail_receipt', {})
-        if (not record.get('complete') or not record.get('created_at') or not text
+        if (not (record.get('complete') is True or record.get('publishable') is True)
+                or not record.get('created_at') or not isinstance(text, str) or not text
                 or base.get('status') != 'confirmed_base' or mail.get('status') != 'verified_sent'
                 or base.get('text_hash') != digest(text) or mail.get('text_hash') != digest(text)):
             continue
