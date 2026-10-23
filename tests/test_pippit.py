@@ -40,6 +40,34 @@ def reader(videos):
     return lambda url: {'url': url, 'valid': True, 'raw_html': html(videos)}
 
 
+def test_transient_unread_catalog_retries_and_records_failure(radar, cards):
+    calls = {}
+    def read(url):
+        calls[url] = calls.get(url, 0) + 1
+        if calls[url] == 1:
+            return {'valid': False, 'http_status': 200, 'text': ''}
+        return reader(cards)(url)
+    assert pippit.run(radar, read) == 0
+    report = store.load(radar / 'latest-pippit-template-scan.json', {})
+    assert all(row['read_attempts'] == 2 for row in report['pages'])
+    assert all('HTTP 200, visible characters 0' in row['read_errors'][0] for row in report['pages'])
+
+
+def test_persistent_unread_catalog_stays_partial_and_preserves_baseline(radar, cards):
+    assert pippit.run(radar, reader(cards)) == 0
+    before = (radar / 'pippit-template-state.json').read_bytes()
+    calls = []
+    def read(url):
+        calls.append(url)
+        return {'valid': False, 'http_status': 200, 'text': ''}
+    assert pippit.run(radar, read) == 1
+    report = store.load(radar / 'latest-pippit-template-scan.json', {})
+    assert report['status'] == 'partial'
+    assert len(calls) == 6
+    assert all(row['status'] == 'unread' and row['read_attempts'] == 2 for row in report['pages'])
+    assert (radar / 'pippit-template-state.json').read_bytes() == before
+
+
 def test_exact_ssr_video_path_preserves_large_ids_names_and_no_images(cards):
     result = pippit.parse_cards(html(cards, image=[{'web_id': '1111111111111111111', 'short_title': 'Static product photo'}]))
     ids = {row['web_id'] for row in result}
