@@ -113,7 +113,7 @@ def test_renamed_map_is_not_silently_lost_with_other_valid_maps():
     current, maps = monitor.crawl(s, {}, fetch)
     assert set(current) == {'https://picsart.com/ai-video-generator/', 'https://picsart.com/tutorials/create-ai-video/'}
     assert 'https://picsart.com/new-landings.xml' in called
-    assert any(m['status'] == 'excluded_scope' and '/fonts/' in m['url'] for m in maps)
+    assert any('https://picsart.com/fonts/fonts.xml' in m.get('excluded_sitemap_urls', []) for m in maps)
 
 
 @pytest.mark.parametrize('url', ['http://10.0.0.1/x', 'http://169.254.169.254/x', 'http://[::1]/x', 'http://test.local/x'])
@@ -130,13 +130,24 @@ def test_picsart_scope_covers_video_tutorials_and_models_without_image_noise():
     for path in ['/tutorials/how-to-turn-photos-into-ai-animated-videos/',
                  '/tutorials/how-to-create-faceless-youtube-history-videos-with-picsart-storyline/',
                  '/ai-models/pixverse-c1-image/', '/ai-models/veo-3-1/',
-                 '/zh/idea-to-movie', '/tutorials/create-product-assembly-animations-from-a-single-image/']:
+                 '/zh/idea-to-movie', '/tutorials/create-product-assembly-animations-from-a-single-image/',
+                 '/effects/fluffy-crew-ai-video-effect-24006/',
+                 '/effects/your-linkedin-talking-avatar-22715/',
+                 '/workflows/create-rotating-product-showcase-video-with-animation-f731462ce421d04351756e06232ad0d457379a4d1b3383a0caef9ef94c91c3ef/',
+                 '/templates/videos/']:
         assert included(path), path
     for path in ['/fonts/foo/', '/colors/red/', '/videos/free-stock/',
                  '/ai-models/nano-banana-2/', '/ai-models/flux-3-image/',
                  '/ai-avatar/', '/ai-stylist/app', '/photo-effects/', '/stock-videos/']:
         assert not included(path), path
-    assert len(s['sitemap_urls']) == 8
+    assert len(s['sitemap_urls']) == 6
+    assert len(s['robots_sitemap_urls']) == 8
+    assert 'https://picsart.com/general-library/general-library.xml' in s['sitemap_urls']
+    assert monitor.sitemap_in_scope(s, 'https://picsart.com/general-library/general-library.xml')
+    assert monitor.sitemap_in_scope(s, 'https://picsart.com/effects/effects.xml')
+    assert monitor.sitemap_in_scope(s, 'https://picsart.com/workflows/workflows.xml')
+    assert monitor.sitemap_in_scope(s, 'https://picsart.com/templates/templates.xml')
+    assert not monitor.sitemap_in_scope(s, 'https://picsart.com/videos/videos.xml')
     assert 'https://picsart.com/miniapp-shell-sitemap.xml' in s['allow_empty_sitemap_urls']
 
 
@@ -145,3 +156,60 @@ def test_picsart_underscore_locale_alias_is_not_a_new_need():
     s = {'id': 'picsart-com'}
     assert canonical_path('https://picsart.com/zh_HANT/idea-to-movie', s) == '/idea-to-movie'
     assert canonical_path('https://picsart.com/zh/idea-to-movie', s) == '/idea-to-movie'
+
+
+def test_recovery_keeps_audited_exclusions_out_of_active_config(tmp_path):
+    s = source()
+    s['sitemap_exclude_urls'] = ['https://example.com/time.xml']
+    s['sitemap_exclude_path_regex'] = [r'^/authors(?:-new)?\.xml$']
+    def fetch(url, options):
+        if url.endswith('old.xml'): raise OSError('retired')
+        if url.endswith('robots.txt'):
+            return b'Sitemap: https://example.com/time.xml\nSitemap: https://example.com/authors-new.xml\nSitemap: https://example.com/new-video-map.xml'
+        assert url == 'https://example.com/new-video-map.xml'
+        return xml('https://example.com/video-new')
+    current, maps = monitor.crawl(s, {}, fetch)
+    assert s['sitemap_urls'] == ['https://example.com/new-video-map.xml']
+    assert s['robots_sitemap_urls'] == ['https://example.com/time.xml', 'https://example.com/authors-new.xml', 'https://example.com/new-video-map.xml']
+    assert list(current) == ['https://example.com/video-new']
+
+
+def test_index_excludes_only_audited_child_and_keeps_unknown_child():
+    s = source()
+    s['sitemap_exclude_urls'] = ['https://example.com/images.xml']
+    def fetch(url, options):
+        if url.endswith('old.xml'):
+            return xml('https://example.com/images.xml', 'https://example.com/previously-unknown.xml', kind='sitemapindex')
+        assert url.endswith('previously-unknown.xml')
+        return xml('https://example.com/video-effect')
+    current, maps = monitor.crawl(s, {}, fetch)
+    assert list(current) == ['https://example.com/video-effect']
+    assert any(m['url'].endswith('images.xml') and m['status'] == 'excluded_scope' for m in maps)
+
+
+def test_all_excluded_recovery_preserves_old_configuration():
+    s = source()
+    s['sitemap_exclude_urls'] = ['https://example.com/images.xml']
+    def fetch(url, options):
+        if url.endswith('old.xml'): raise OSError('retired')
+        assert url.endswith('robots.txt')
+        return b'Sitemap: https://example.com/images.xml'
+    with pytest.raises(monitor.CrawlFailure, match='no sitemap inside the audited scope'):
+        monitor.crawl(s, {}, fetch)
+    assert s['sitemap_urls'] == ['https://example.com/old.xml']
+    assert 'robots_sitemap_urls' not in s
+
+
+def test_pruned_and_restored_map_scope_is_inventory_not_new_demand():
+    s = source()
+    old = {'https://example.com/video-old': {'lastmod': None},
+           'https://example.com/photo': {'lastmod': None}}
+    previous, _ = monitor.reconcile(s, None, old, '2026-01-01T00:00:00+00:00')
+    s['sitemap_exclude_urls'] = ['https://example.com/images.xml']
+    current = {'https://example.com/video-old': {'lastmod': None},
+               'https://example.com/video-newly-covered': {'lastmod': None}}
+    state, result = monitor.reconcile(s, previous, current, '2026-10-27T00:00:00+00:00')
+    assert result['scope_reset'] is True
+    assert result['added'] == result['removed'] == []
+    assert state['seen']['https://example.com/photo'].startswith('2026-01-01')
+    assert state['baseline']['https://example.com/video-old']['first_seen'].startswith('2026-01-01')

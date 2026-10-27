@@ -75,14 +75,23 @@ with the original digest byte format; receipts remain replayable. Both scan mode
 share `scheduled-scan.lock` and the queue lock. Busy exits 75. Nonzero source errors,
 partial coverage, or unread dynamic catalogs are never a no-opportunity finding.
 Sitemap failures trigger one bounded same-origin `/robots.txt` refresh. Replacement
-maps retain the configured sitemap/path filters and are committed with the new
+maps retain configured sitemap/path filters. Audited map exclusions apply to
+both root replacement and index children; raw robots declarations remain evidence
+in `robots_sitemap_urls`, separately from effective `sitemap_urls`. Unknown maps
+remain eligible for validation. Replacement roots are committed with the new
 baseline only after complete validation. Recovery receipts retain the original
 failure; failed recovery preserves both config and baseline. A changed scope builds
 inventory without creating new-demand observations.
 
-The Picsart configuration retains all eight robots declarations, reading landing
-pages, miniapps, blog posts, localized pages and tutorials while excluding fonts,
-colors and stock libraries. Only its explicitly configured miniapp map may be a
+The full 59-source map audit removes only exhaustively verified unrelated roots
+(time-zone conversions, author profiles, image-only API/payment navigation, and
+font/color inventories). Mixed maps remain. Higgsfield supplemental maps retain
+video-generation documentation, mixed-media videos and future contest inventory.
+
+Picsart retains eight raw robots declarations but six effective roots. Its mixed
+`general-library` index stays active for effects, workflows, video templates and
+unknown future children; only five verified asset/navigation child maps and blog
+archive maps are excluded. Fonts and colors are removed from active roots. Only its explicitly configured miniapp map may be a
 valid empty `urlset`, and only after robots confirms that declaration. Such receipts
 say `empty_preserved`; prior scoped URLs are conservatively retained because legacy
 snapshots lack per-map attribution. They are historical inventory, not a current

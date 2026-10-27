@@ -139,11 +139,17 @@ class CrawlFailure(Exception):
         self.observed_count = observed_count
 
 
+def sitemap_in_scope(source, url):
+    path = urllib.parse.urlsplit(url).path
+    includes = source.get('sitemap_include_path_regex', [])
+    return (not includes or any(re.search(p, path) for p in includes)) and not (
+        url in source.get('sitemap_exclude_urls', []) or
+        any(re.search(p, path) for p in source.get('sitemap_exclude_path_regex', [])))
+
+
 def _crawl(source, options, fetcher=fetch_bytes, previous=None, declared=()):
     includes = [re.compile(x) for x in source.get("include_path_regex", [])]
     excludes = [re.compile(x) for x in source.get("exclude_path_regex", [])]
-    map_includes = [re.compile(x) for x in source.get('sitemap_include_path_regex', [])]
-    map_excludes = [re.compile(x) for x in source.get('sitemap_exclude_path_regex', [])]
     empty_maps = set(source.get('allow_empty_sitemap_urls', [])) & set(declared)
     retained = False
     limit = int(source.get("max_sitemaps", 30))
@@ -158,10 +164,7 @@ def _crawl(source, options, fetcher=fetch_bytes, previous=None, declared=()):
         if len(visited) >= limit or depth > MAX_DEPTH:
             raise CrawlFailure("incomplete", "Sitemap count/depth limit reached", maps, len(items))
         visited.add(url)
-        if map_includes and not any(p.search(urllib.parse.urlsplit(url).path) for p in map_includes):
-            maps.append({'url': url, 'status': 'excluded_scope'})
-            continue
-        if any(p.search(urllib.parse.urlsplit(url).path) for p in map_excludes):
+        if not sitemap_in_scope(source, url):
             maps.append({'url': url, 'status': 'excluded_scope'})
             continue
         try:
@@ -245,24 +248,30 @@ def crawl(source, options, fetcher=fetch_bytes, previous=None):
     except CrawlFailure as original:
         try:
             robots, urls = robots_sitemaps(source, options, fetcher)
-            candidate = dict(source, sitemap_urls=urls)
+            active = [url for url in urls if sitemap_in_scope(source, url)]
+            if not active:
+                raise ValueError('Robots declares no sitemap inside the audited scope')
+            candidate = dict(source, sitemap_urls=active)
             current, maps = _crawl(candidate, options, fetcher, previous, declared=urls)
         except Exception as recovery:
             extra = getattr(recovery, 'checked_maps', [])
             raise CrawlFailure(original.status, str(original) + '; robots recovery failed: ' + str(recovery),
                                original.checked_maps + extra, original.observed_count) from recovery
         maps.append({'url': robots, 'root': 'robots', 'status': 'recovered',
-                     'previous_sitemap_urls': source['sitemap_urls'], 'sitemap_urls': urls,
+                     'previous_sitemap_urls': source['sitemap_urls'], 'sitemap_urls': active,
+                     'robots_declared_sitemap_urls': urls,
+                     'excluded_sitemap_urls': [url for url in urls if url not in active],
                      'original_failure': str(original), 'previous_checked_maps': original.checked_maps})
         # Mutate only after the entire replacement set has passed validation.
         # The caller persists this source with the matching baseline transaction.
-        source['sitemap_urls'] = urls
+        source['sitemap_urls'] = active
+        source['robots_sitemap_urls'] = urls
         return current, maps
 
 
 def scope_hash(source):
     keys = ['sitemap_urls', 'include_path_regex', 'exclude_path_regex']
-    keys.extend(key for key in ('sitemap_include_path_regex', 'sitemap_exclude_path_regex', 'allow_empty_sitemap_urls') if source.get(key))
+    keys.extend(key for key in ('sitemap_include_path_regex', 'sitemap_exclude_path_regex', 'sitemap_exclude_urls', 'allow_empty_sitemap_urls') if source.get(key))
     scope = {key: sorted(set(source.get(key, []))) for key in keys}
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
 
