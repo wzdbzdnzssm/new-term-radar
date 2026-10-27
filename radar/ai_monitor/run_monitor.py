@@ -3,6 +3,7 @@ import argparse
 import gzip
 import hashlib
 import io
+import ipaddress
 import json
 import os
 import re
@@ -29,8 +30,15 @@ def checked_url(value):
     if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.password:
         raise ValueError("Only public HTTP(S) URLs without credentials are accepted")
     # Redirects and sitemap children receive the same URL validation.
-    if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
+    host = (parsed.hostname or '').lower().rstrip('.')
+    if host == 'localhost' or host.endswith(('.localhost', '.local', '.internal')):
         raise ValueError("Local addresses are not public sitemap sources")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise ValueError("Private addresses are not public sitemap sources")
     return value
 
 
@@ -53,7 +61,7 @@ def local_name(tag):
     return tag.rsplit("}", 1)[-1]
 
 
-def parse_sitemap(data, max_bytes=15000000):
+def parse_sitemap(data, max_bytes=15000000, allow_empty=False):
     """Only direct sitemap/url children and their direct loc/lastmod count."""
     data = inflate(data, max_bytes)
     if b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
@@ -75,7 +83,7 @@ def parse_sitemap(data, max_bytes=15000000):
         if len(mods) > 1:
             raise ValueError("Duplicate direct lastmod")
         records.append({"url": checked_url(locations[0]), "lastmod": mods[0] if mods else None})
-    if not records:
+    if not records and not (allow_empty and kind == 'urlset'):
         raise ValueError("Empty sitemap is anomalous; previous baseline retained")
     return kind, records
 
@@ -131,21 +139,38 @@ class CrawlFailure(Exception):
         self.observed_count = observed_count
 
 
-def crawl(source, options, fetcher=fetch_bytes):
+def _crawl(source, options, fetcher=fetch_bytes, previous=None, declared=()):
     includes = [re.compile(x) for x in source.get("include_path_regex", [])]
     excludes = [re.compile(x) for x in source.get("exclude_path_regex", [])]
+    map_includes = [re.compile(x) for x in source.get('sitemap_include_path_regex', [])]
+    map_excludes = [re.compile(x) for x in source.get('sitemap_exclude_path_regex', [])]
+    empty_maps = set(source.get('allow_empty_sitemap_urls', [])) & set(declared)
+    retained = False
     limit = int(source.get("max_sitemaps", 30))
     queue = [(checked_url(u), 0) for u in source["sitemap_urls"]]
     visited, maps, items = set(), [], {}
     while queue:
         url, depth = queue.pop(0)
+        if declared and urllib.parse.urlsplit(url)[:2] != urllib.parse.urlsplit(declared[0])[:2]:
+            raise CrawlFailure('error', 'Recovered sitemap child leaves configured origin', maps, len(items))
         if url in visited:
             continue
         if len(visited) >= limit or depth > MAX_DEPTH:
             raise CrawlFailure("incomplete", "Sitemap count/depth limit reached", maps, len(items))
         visited.add(url)
+        if map_includes and not any(p.search(urllib.parse.urlsplit(url).path) for p in map_includes):
+            maps.append({'url': url, 'status': 'excluded_scope'})
+            continue
+        if any(p.search(urllib.parse.urlsplit(url).path) for p in map_excludes):
+            maps.append({'url': url, 'status': 'excluded_scope'})
+            continue
         try:
-            kind, entries = parse_sitemap(fetcher(url, options), int(options.get("max_bytes", 15000000)))
+            kind, entries = parse_sitemap(fetcher(url, options), int(options.get("max_bytes", 15000000)), allow_empty=url in empty_maps)
+            if not entries:
+                retained = True
+                maps.append({'url': url, 'root': kind, 'entry_count': 0, 'status': 'empty_preserved',
+                             'notice': 'Robots-declared optional empty inventory; prior scoped URLs retained, not currently observed'})
+                continue
             maps.append({"url": url, "root": kind, "entry_count": len(entries), "status": "ok"})
             if kind == "sitemapindex":
                 queue.extend((entry["url"], depth + 1) for entry in entries)
@@ -164,13 +189,81 @@ def crawl(source, options, fetcher=fetch_bytes):
         except Exception as error:
             maps.append({"url": url, "status": "error", "error": str(error)})
             raise CrawlFailure("error", str(error), maps, len(items)) from error
+    observed_count = len(items)
+    if retained and previous:
+        # Older snapshots did not attribute URLs to individual maps. Retain the
+        # prior scoped inventory conservatively rather than invent removals.
+        for url, entry in previous.get('baseline', {}).items():
+            path = urllib.parse.urlsplit(url).path
+            if includes and not any(p.search(path) for p in includes):
+                continue
+            if any(p.search(path) for p in excludes):
+                continue
+            items.setdefault(url, {'url': url, 'lastmod': entry.get('lastmod')})
+    for record in maps:
+        if record.get('status') == 'empty_preserved':
+            record['retained_scoped_url_count'] = len(items) - observed_count
     if not items:
         raise CrawlFailure("error", "No URLs match configured scope; empty observation retained as anomaly", maps, 0)
     return items, maps
 
 
+def robots_sitemaps(source, options, fetcher):
+    """Discover bounded replacement maps on the configured origin only."""
+    origins = {urllib.parse.urlsplit(checked_url(url))[:2] for url in source['sitemap_urls']}
+    if len(origins) != 1:
+        raise ValueError('Robots recovery requires one configured origin')
+    scheme, origin = next(iter(origins))
+    robots = scheme + '://' + origin + '/robots.txt'
+    limits = dict(options, max_bytes=min(int(options.get('max_bytes', 15000000)), 256000))
+    body = fetcher(robots, limits)
+    if len(body) > limits['max_bytes']:
+        raise ValueError('Robots exceeds bounded size')
+    urls = []
+    for line in body.decode('utf-8-sig').splitlines():
+        match = re.match(r'^\s*sitemap\s*:\s*(\S+)', line, re.I)
+        if not match:
+            continue
+        url = checked_url(match.group(1))
+        parsed = urllib.parse.urlsplit(url)
+        if parsed[:2] != (scheme, origin):
+            continue
+        if parsed.fragment:
+            raise ValueError('Sitemap URLs cannot contain fragments')
+        if url not in urls:
+            urls.append(url)
+        if len(urls) > int(source.get('max_sitemaps', 30)):
+            raise ValueError('Robots sitemap count exceeds configured limit')
+    if not urls:
+        raise ValueError('Robots declares no same-origin sitemap')
+    return robots, urls
+
+
+def crawl(source, options, fetcher=fetch_bytes, previous=None):
+    try:
+        return _crawl(source, options, fetcher, previous)
+    except CrawlFailure as original:
+        try:
+            robots, urls = robots_sitemaps(source, options, fetcher)
+            candidate = dict(source, sitemap_urls=urls)
+            current, maps = _crawl(candidate, options, fetcher, previous, declared=urls)
+        except Exception as recovery:
+            extra = getattr(recovery, 'checked_maps', [])
+            raise CrawlFailure(original.status, str(original) + '; robots recovery failed: ' + str(recovery),
+                               original.checked_maps + extra, original.observed_count) from recovery
+        maps.append({'url': robots, 'root': 'robots', 'status': 'recovered',
+                     'previous_sitemap_urls': source['sitemap_urls'], 'sitemap_urls': urls,
+                     'original_failure': str(original), 'previous_checked_maps': original.checked_maps})
+        # Mutate only after the entire replacement set has passed validation.
+        # The caller persists this source with the matching baseline transaction.
+        source['sitemap_urls'] = urls
+        return current, maps
+
+
 def scope_hash(source):
-    scope = {key: sorted(set(source.get(key, []))) for key in ("sitemap_urls", "include_path_regex", "exclude_path_regex")}
+    keys = ['sitemap_urls', 'include_path_regex', 'exclude_path_regex']
+    keys.extend(key for key in ('sitemap_include_path_regex', 'sitemap_exclude_path_regex', 'allow_empty_sitemap_urls') if source.get(key))
+    scope = {key: sorted(set(source.get(key, []))) for key in keys}
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
 
 
@@ -222,7 +315,7 @@ def process_source(source, options, state_dir, fetcher=fetch_bytes):
     previous = json.loads(state_file.read_text(encoding="utf-8")) if state_file.exists() else None
     observed_at = utc_now()
     try:
-        current, maps = crawl(source, options, fetcher)
+        current, maps = crawl(source, options, fetcher, previous)
         state, result = reconcile(source, previous, current, observed_at)
         atomic_json(state_file, state)
         result["checked_maps"] = maps
@@ -261,6 +354,8 @@ def _main_unlocked(argv=None):
         except Exception as error:
             result = {"id": source["id"], "status": "error", "error": str(error), "baseline": [], "added": [], "changed": [], "removed": []}
         results.append(result)
+        if result['status'] == 'ok' and any(m.get('status') == 'recovered' for m in result.get('checked_maps', [])):
+            atomic_json(args.config, config)
         print(f"{source['id']}: {result['status']} baseline={len(result['baseline'])} added={len(result['added'])} changed={len(result['changed'])} removed={len(result['removed'])}")
         if result.get("error"):
             print("  " + result["error"])

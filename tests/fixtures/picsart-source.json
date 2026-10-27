@@ -1,0 +1,29 @@
+{
+  "id": "picsart-com",
+  "name": "Picsart",
+  "enabled": true,
+  "sitemap_urls": [
+    "https://picsart.com/landings/landings.xml",
+    "https://picsart.com/miniapp-shell-sitemap.xml",
+    "https://picsart.com/blog/sitemap.xml",
+    "https://picsart.com/fonts/fonts.xml",
+    "https://picsart.com/colors/colors.xml",
+    "https://picsart.com/general-library/general-library.xml",
+    "https://picsart.com/sitemap/lp-localization.xml",
+    "https://picsart.com/tutorials/tutorials.xml"
+  ],
+  "sitemap_exclude_path_regex": ["^/(?:fonts/|colors/|general-library/|blog/(?:page|category|post_tag)-sitemap(?:[0-9]*)\\.xml$)"],
+  "allow_empty_sitemap_urls": ["https://picsart.com/miniapp-shell-sitemap.xml"],
+  "include_path_regex": [
+    "(?i)(?:video|animation|animate|motion|storyline|idea-to-movie|storyspace|/captions(?:/|$)|ai-microdrama|ai-reel|ai-gif)",
+    "(?i)/ai-models/(?:pixverse|kling|sora|veo|seedance|wan-|ltx-|hailuo|happyhorse|luma-ray|runway-gen-4(?:/|$)|minimax-h3|creatify-boreal|pika-frames|bytedance-omnihuman)"
+  ],
+  "exclude_path_regex": [
+    "(?i)/(?:privacy(?:-policy)?|terms(?:-of-service|-and-conditions)?|cookie-policy|login|signup|sign-in|pricing)(?:[/.]|$)",
+    "(?i)/(?:fonts|colors|videos|stock-videos|images|stickers|backgrounds|templates)(?:/|$)",
+    "(?i)/(?:video-to-mp3|video-to-gif|flip-video|trim-video|crop-video|resize-video|video-compressor|add-text-to-video|add-music-to-video|add-subtitles-to-video|logged-in-create-video)(?:/|$)",
+    "(?i)/(?:blog/(?:category|tag|author)/|tutorials/how-to-make-virtual-backgrounds-for-video-calls/)"
+  ],
+  "max_sitemaps": 30,
+  "scope_note": "robots.txt八项声明完整保留；抓取AI视频相关落地页、miniapp、博客文章、语言页与教程，排除字体、颜色、通用素材库及非视频内容。路径仅用于候选范围，语义审核仍须核实用户输入、动作及视频输出；视频模型的image后缀不单独排除。miniapp合法空urlset须再次核实robots声明并保留历史范围内URL，不把空图或范围刷新视为新增需求。语言镜像沿用canonical_path归并。"
+}

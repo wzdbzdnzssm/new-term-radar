@@ -74,6 +74,26 @@ keeps every qualifying P1 even if an action summary contains at most five items.
 with the original digest byte format; receipts remain replayable. Both scan modes
 share `scheduled-scan.lock` and the queue lock. Busy exits 75. Nonzero source errors,
 partial coverage, or unread dynamic catalogs are never a no-opportunity finding.
+Sitemap failures trigger one bounded same-origin `/robots.txt` refresh. Replacement
+maps retain the configured sitemap/path filters and are committed with the new
+baseline only after complete validation. Recovery receipts retain the original
+failure; failed recovery preserves both config and baseline. A changed scope builds
+inventory without creating new-demand observations.
+
+The Picsart configuration retains all eight robots declarations, reading landing
+pages, miniapps, blog posts, localized pages and tutorials while excluding fonts,
+colors and stock libraries. Only its explicitly configured miniapp map may be a
+valid empty `urlset`, and only after robots confirms that declaration. Such receipts
+say `empty_preserved`; prior scoped URLs are conservatively retained because legacy
+snapshots lack per-map attribution. They are historical inventory, not a current
+page-availability claim. Invalid XML, an empty index and HTTP failures remain errors.
+An unrelated empty sitemap is still anomalous. Locale aliases retain stable identity.
+
+The server daily job and both opportunity-gate commands use the existing Hermes
+Python environment (`/home/admin/.hermes/hermes-agent/venv/bin/python`), which has
+its required scheduler dependencies. The gate still requires real semantic review
+and its existing three-part opportunity and native-execution checks.
+
 The coordinator's `latest-scan.json` records the source scope actually covered by
 that batch; `latest-template-scan.json` reports Higgsfield supplementary coverage,
 and `latest-pippit-template-scan.json` reports the three Pippit catalogs. An older

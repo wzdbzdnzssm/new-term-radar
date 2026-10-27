@@ -24,7 +24,7 @@ def review_lane(source, evidence, migrated):
     return 'secondary' if source['id'] == 'magichour-ai' else 'video_candidate'
 
 def collect(source, options, previous, fetcher=monitor.fetch_bytes, evidence_fetcher=None, name_fetcher=None):
-    current, maps = monitor.crawl(source, options, fetcher)
+    current, maps = monitor.crawl(source, options, fetcher, previous)
     next_state, result = monitor.reconcile(source, previous, current, monitor.utc_now())
     result['checked_maps'] = maps
     history = {}
@@ -91,6 +91,8 @@ def run(root, selected=None, fetcher=monitor.fetch_bytes, evidence_fetcher=None,
             pending_count = len(pending['observations'])
             try:
                 operations = [op(state_path, state), op('pending-observations.json', pending)]
+                if any(m.get('status') == 'recovered' for m in result.get('checked_maps', [])):
+                    operations.append(op('monitor/config.json', config))
                 if receipt_path:
                     operations.append(op(receipt_path, {'schema_version': 1, 'status': 'committed', 'source_id': source['id'], 'committed_at': monitor.utc_now(), 'state_sha256': digest(state), 'result': result}))
                 commit(root, 'scan', operations, {'source_id': source['id'], 'next_state_operation': state_path, 'observations': incoming})

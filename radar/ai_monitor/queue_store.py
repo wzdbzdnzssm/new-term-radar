@@ -47,7 +47,7 @@ def canonical_path(url, source=None):
     # Only the documented language slots; never remove an arbitrary middle segment.
     positions = (source or {}).get('language_positions', ['root'])
     media = (urlsplit(url).hostname or '').removeprefix('www.') == 'media.io' or (source or {}).get('id') == 'media-io'
-    if 'root' in positions and parts and parts[0].lower() in LANGS:
+    if 'root' in positions and parts and parts[0].lower().replace('_', '-') in LANGS:
         parts.pop(0)
     if media and len(parts) > 1 and parts[0] == 'ai' and parts[1].lower() in LANGS:
         parts.pop(1)
