@@ -10,6 +10,9 @@ from .queue_store import monitor, digest, load, write, locked, recover, evidence
 from .evidence_metadata import compact, prepare_history, verified
 from .runtime import DEFAULT_ROOT
 ROOT = DEFAULT_ROOT
+# SSR template pages embed several MB of WebP data URIs. Keep the complete
+# document for names, cards and dates, within the same 15MB bound as sitemaps.
+MAX_HTML_BYTES = 15000000
 
 class Text(html.parser.HTMLParser):
     def __init__(self):
@@ -41,8 +44,8 @@ def read_page(url, opener=None):
         monitor.checked_url(url)
         client = opener or urllib.request.build_opener(monitor.CheckedRedirect())
         with client.open(urllib.request.Request(url, headers={'User-Agent': 'SitemapTrendMonitor/2.0 evidence'}), timeout=25) as response:
-            raw = response.read(5000001)
-            if len(raw) > 5000000: raise ValueError('Evidence HTML exceeds 5MB')
+            raw = response.read(MAX_HTML_BYTES + 1)
+            if len(raw) > MAX_HTML_BYTES: raise ValueError('Evidence HTML exceeds 15MB')
             final = monitor.checked_url(response.geturl())
             if 'html' not in response.headers.get('Content-Type', '').lower(): raise ValueError('Evidence is not HTML')
             data = parse_html(raw.decode(response.headers.get_content_charset() or 'utf-8', errors='replace'), final)
